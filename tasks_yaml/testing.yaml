@@ -1,0 +1,84 @@
+# ==========================================
+# 自動化測試生成配置
+# Automated Testing Generation
+# ==========================================
+
+task:
+  name: "自動化測試"
+  description: "自動生成測試案例和測試腳本"
+  language: "繁體中文"
+  output_dir: "tests"
+
+opencode:
+  model: "openai/gpt-5.2-codex"
+  max_tokens: 128000
+  token_threshold: 0.7
+
+execution:
+  delay: 1
+  timeout: 300
+  auto_continue_on_error: true
+  max_retries: 5
+
+prompts:
+  - |
+    繼續生成測試案例，涵蓋以下類型：
+    - 單元測試（pytest/unittest）
+    - 集成測試
+    - E2E 測試
+    - 性能測試
+    
+    要求：
+    - 使用繁體中文註解
+    - 測試覆蓋率 > 80%
+    - 包含正向和負向測試
+    - Mock 外部依賴
+    - Fixture 設計合理
+    - 直接執行
+  
+  - |
+    擴充測試套件，添加更多測試場景。
+    
+    要求：
+    - 邊界條件測試
+    - 異常處理測試
+    - 並發測試
+    - 數據驅動測試
+    - 參數化測試
+    - 立即執行
+  
+  - |
+    持續完善測試覆蓋，補充缺失的測試案例。
+    
+    要求：
+    - 回歸測試
+    - 安全性測試
+    - 兼容性測試
+    - 壓力測試
+    - 直接執行
+
+summary_prompt: |
+  請用繁體中文總結本輪工作（300字內）：
+
+  【目標】
+  建立完整的自動化測試體系
+
+  【請說明】
+  1. 新增的測試類型
+  2. 測試案例數量
+  3. 測試覆蓋率
+  4. 發現的潛在問題
+  5. 下一步測試重點
+
+  然後我們換新 session 繼續測試開發。
+
+context:
+  export_last_messages: 5
+  max_context_chars: 500
+  use_last_snippets: 3
+
+display:
+  show_session_id: true
+  show_token_usage: true
+  show_timestamp: true
+  color_per_session: true

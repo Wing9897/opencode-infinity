@@ -1,0 +1,116 @@
+# ==========================================
+# OpenCode Infinity - 預設配置範例
+# Default Configuration Template
+# ==========================================
+#
+# 使用方式：
+#   1. 直接使用配置名稱（不需要 .yaml 後綴）：
+#      python3 opencode-infinity.py medical-kb
+#
+#   2. 或複製此檔案到 tasks_yaml/ 目錄創建新任務：
+#      cp config.yaml tasks_yaml/my-custom-task.yaml
+#
+# 更多範例請參考 tasks_yaml/ 目錄
+# ==========================================
+
+# ========== 任務基本設定 ==========
+task:
+  name: "通用任務"               # 任務名稱（顯示用）
+  description: "AI 自動化任務"    # 任務描述
+  language: "繁體中文"            # 輸出語言
+  output_dir: "output"           # 輸出目錄（相對路徑）
+
+# ========== OpenCode 設定 ==========
+opencode:
+  model: "openai/gpt-5.2-codex"  # AI 模型
+  max_tokens: 128000             # 模型最大 token 數
+  token_threshold: 0.7           # Token 使用閾值 (0.0-1.0)
+                                 # 達到此比例時自動切換 session
+
+# ========== 執行設定 ==========
+execution:
+  delay: 1                       # 每輪延遲（秒）
+  timeout: 300                   # 基礎超時（秒）
+                                 # 實際使用指數退避：5分 → 10分 → 20分 → 40分 → 60分
+  auto_continue_on_error: true   # 執行失敗是否繼續
+  max_retries: 5                 # Session 切換最大重試次數
+
+# ========== 提示詞設定 ==========
+# 提示詞會按順序循環使用
+prompts:
+  - |
+    請繼續執行任務。
+    要求：
+    - 使用繁體中文
+    - 直接執行無需確認
+    - 保持高質量輸出
+  
+  - |
+    繼續工作，擴展之前的內容。
+    要求：
+    - 保持一致性
+    - 避免重複
+    - 立即執行
+  
+  - |
+    持續推進任務進度。
+    要求：
+    - 系統化處理
+    - 完整性檢查
+    - 直接執行
+
+# ========== 總結提示詞 ==========
+# 當達到 token 閾值時，會使用此提示詞請求 AI 總結
+summary_prompt: |
+  請用繁體中文總結本輪工作（300字內）：
+
+  【目標】
+  （說明本輪的主要目標）
+
+  【請說明】
+  1. 完成了哪些工作
+  2. 處理的內容範圍
+  3. 遇到的問題和解決方案
+  4. 輸出文件或成果
+  5. 下一步建議
+
+  然後我們換新 session 繼續工作。
+
+# ========== 上下文傳遞設定 ==========
+context:
+  export_last_messages: 5        # 導出最後 N 條對話消息
+  max_context_chars: 500         # 單條消息最大字符數
+  use_last_snippets: 3           # 使用最後 N 個代碼片段
+
+# ========== 顯示設定 ==========
+display:
+  show_session_id: true          # 顯示 session ID
+  show_token_usage: true         # 顯示 token 使用量
+  show_timestamp: true           # 顯示時間戳
+  color_per_session: true        # 每個 session 使用不同顏色
+
+# ==========================================
+# 💡 提示：
+#
+# 1. Token 閾值建議：
+#    - 文檔類：0.6-0.7（更頻繁切換）
+#    - 代碼類：0.7-0.8（保持上下文）
+#
+# 2. 延遲設定建議：
+#    - 快速測試：0.5-1秒
+#    - 正常使用：1-2秒
+#    - 避免限流：3-5秒
+#
+# 3. 模型選擇：
+#    - 代碼任務：openai/gpt-5.2-codex
+#    - 文檔任務：anthropic/claude-sonnet-3.5
+#    - 通用任務：openai/gpt-4-turbo
+#
+# 4. 命令行參數可覆蓋任何設定：
+#    python3 opencode-infinity.py medical-kb \
+#      --model openai/gpt-5.2-codex \
+#      --threshold 0.8 \
+#      --delay 2
+#
+# 更多資訊請參考：README.md
+# ==========================================

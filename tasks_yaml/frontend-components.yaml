@@ -1,0 +1,85 @@
+# ==========================================
+# 前端組件開發配置
+# Frontend Components Development
+# ==========================================
+
+task:
+  name: "前端組件"
+  description: "自動生成 React/Vue 可重用組件"
+  language: "繁體中文"
+  output_dir: "components"
+
+opencode:
+  model: "openai/gpt-5.2-codex"
+  max_tokens: 128000
+  token_threshold: 0.75
+
+execution:
+  delay: 2
+  timeout: 300
+  auto_continue_on_error: true
+  max_retries: 5
+
+prompts:
+  - |
+    繼續開發前端 UI 組件，實現以下類型：
+    - 表單組件（Input, Select, Checkbox）
+    - 數據展示（Table, Card, List）
+    - 導航組件（Menu, Tabs, Breadcrumb）
+    - 反饋組件（Modal, Toast, Loading）
+    
+    要求：
+    - React/Vue 3 語法
+    - TypeScript 類型定義
+    - 繁體中文註解
+    - 響應式設計
+    - 可訪問性（A11y）
+    - Storybook 示例
+    - 直接執行
+  
+  - |
+    擴充組件庫，添加更多實用組件。
+    
+    要求：
+    - 組件組合模式
+    - Props 驗證
+    - 事件處理
+    - 樣式方案（CSS Modules/Styled）
+    - 單元測試（Jest/Vitest）
+    - 立即執行
+  
+  - |
+    持續優化組件質量和性能。
+    
+    要求：
+    - 性能優化（memo, lazy）
+    - 主題定制
+    - 國際化支持
+    - 文檔完善
+    - 直接執行
+
+summary_prompt: |
+  請用繁體中文總結本輪工作（300字內）：
+
+  【目標】
+  構建可重用的前端組件庫
+
+  【請說明】
+  1. 新增的組件類型
+  2. 組件功能特性
+  3. 測試覆蓋情況
+  4. 性能優化成果
+  5. 下一步開發建議
+
+  然後我們換新 session 繼續開發。
+
+context:
+  export_last_messages: 5
+  max_context_chars: 600
+  use_last_snippets: 3
+
+display:
+  show_session_id: true
+  show_token_usage: true
+  show_timestamp: true
+  color_per_session: true
