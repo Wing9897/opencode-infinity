@@ -4,7 +4,7 @@
 
 **通用 OpenCode CLI 自動化框架**  
 智能 Token 管理 · 自動 Session 切換 · 24/7 無人值守運行
-
+合適發展性任務，無限擴展的任務
 [![Python Version](https://img.shields.io/badge/python-3.7+-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![OpenCode CLI](https://img.shields.io/badge/OpenCode-CLI-green.svg)](https://github.com/opencode-cli)
