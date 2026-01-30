@@ -1,84 +1,57 @@
-# ==========================================
-# 數據處理任務配置
-# Data Processing Task Configuration
-# ==========================================
+# 數據處理配置
 
-task:
-  name: "數據處理"
-  description: "自動生成數據清理和分析腳本"
-  language: "繁體中文"
-  output_dir: "data_scripts"
+data-processing-opencode:
+  task:
+    name: "數據處理"
+    language: "繁體中文"
+    output_dir: "data"
+  cli:
+    tool: "opencode"
+  opencode:
+    max_tokens: 128000
+    token_threshold: 0.7
+  execution:
+    delay: 1
+    timeout: 300
+    max_retries: 5
+  prompts:
+    - "生成數據處理管道：CSV/JSON 讀取、清洗、轉換、導出"
+  summary_prompt: "總結本輪工作（300字內）"
 
-opencode:
-  model: "openai/gpt-5.2-codex"
-  max_tokens: 128000
-  token_threshold: 0.7
+data-processing-claude:
+  task:
+    name: "數據處理"
+    language: "繁體中文"
+    output_dir: "data"
+  cli:
+    tool: "claude"
+  opencode:
+    max_tokens: 128000
+    token_threshold: 0.7
+  execution:
+    delay: 1
+    timeout: 300
+    max_retries: 5
+  prompts:
+    - "生成數據處理管道：CSV/JSON 讀取、清洗、轉換、導出"
+  summary_prompt: "總結本輪工作（300字內）"
 
-execution:
-  delay: 1
-  timeout: 300
-  auto_continue_on_error: true
-  max_retries: 5
-
-prompts:
-  - |
-    繼續開發數據處理腳本，實現以下功能：
-    - 數據清理（缺失值、異常值）
-    - 數據轉換（格式化、標準化）
-    - 數據聚合（統計、分組）
-    - 數據可視化（圖表生成）
-    
-    要求：
-    - 使用 Pandas/NumPy
-    - 繁體中文註解
-    - 處理大數據集效率
-    - 錯誤處理完善
-    - 包含使用範例
-    - 直接執行
-  
-  - |
-    擴充數據處理功能，添加更多分析方法。
-    
-    要求：
-    - ETL 流程設計
-    - 數據驗證規則
-    - 批量處理能力
-    - 日誌和監控
-    - 結果導出（CSV/Excel/JSON）
-    - 立即執行
-  
-  - |
-    持續優化數據處理管道，提升效能和可靠性。
-    
-    要求：
-    - 並行處理
-    - 內存優化
-    - 數據質量檢查
-    - 自動化報告
-    - 直接執行
-
-summary_prompt: |
-  請用繁體中文總結本輪工作（300字內）：
-
-  【目標】
-  建立完整的數據處理管道
-
-  【請說明】
-  1. 實現的數據處理功能
-  2. 支持的數據格式
-  3. 處理效率和性能
-  4. 數據質量改善
-  5. 下一步開發方向
-
-  然後我們換新 session 繼續開發。
-
-context:
-  export_last_messages: 5
-  max_context_chars: 500
-  use_last_snippets: 3
-
-display:
-  show_session_id: true
-  show_token_usage: true
-  show_timestamp: true
-  color_per_session: true
+data-processing-codex:
+  task:
+    name: "數據處理"
+    language: "繁體中文"
+    output_dir: "data"
+  cli:
+    tool: "codex"
+    commands:
+      run_session: "codex exec resume --last --skip-git-repo-check"
+  opencode:
+    max_tokens: 128000
+    token_threshold: 0.7
+  execution:
+    delay: 1
+    timeout: 300
+    max_retries: 5
+  prompts:
+    - "生成數據處理管道：CSV/JSON 讀取、清洗、轉換、導出"
+  summary_prompt: "總結本輪工作（300字內）"

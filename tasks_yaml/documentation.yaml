@@ -1,83 +1,57 @@
-# ==========================================
-# 技術文檔生成配置
-# Technical Documentation Generation
-# ==========================================
+# 文檔配置
 
-task:
-  name: "技術文檔"
-  description: "自動生成技術教程和文檔"
-  language: "繁體中文"
-  output_dir: "docs"
+documentation-opencode:
+  task:
+    name: "文檔"
+    language: "繁體中文"
+    output_dir: "docs"
+  cli:
+    tool: "opencode"
+  opencode:
+    max_tokens: 128000
+    token_threshold: 0.7
+  execution:
+    delay: 1
+    timeout: 300
+    max_retries: 5
+  prompts:
+    - "生成項目文檔：README、API 文檔、使用指南"
+  summary_prompt: "總結本輪工作（300字內）"
 
-opencode:
-  model: "openai/gpt-5.2-codex"
-  max_tokens: 128000
-  token_threshold: 0.65  # 文檔可以用較低閾值
+documentation-claude:
+  task:
+    name: "文檔"
+    language: "繁體中文"
+    output_dir: "docs"
+  cli:
+    tool: "claude"
+  opencode:
+    max_tokens: 128000
+    token_threshold: 0.7
+  execution:
+    delay: 1
+    timeout: 300
+    max_retries: 5
+  prompts:
+    - "生成項目文檔：README、API 文檔、使用指南"
+  summary_prompt: "總結本輪工作（300字內）"
 
-execution:
-  delay: 1
-  timeout: 300
-  auto_continue_on_error: true
-  max_retries: 5
-
-prompts:
-  - |
-    繼續編寫技術文檔，涵蓋以下主題：
-    - 快速開始指南
-    - API 使用教程
-    - 最佳實踐
-    - 常見問題解答
-    
-    要求：
-    - 使用繁體中文
-    - Markdown 格式
-    - 包含代碼示例
-    - 結構清晰，易於閱讀
-    - 添加圖表說明（Mermaid）
-    - 直接執行
-  
-  - |
-    擴充技術文檔庫，添加進階主題教程。
-    
-    要求：
-    - 深入淺出的說明
-    - 實際案例分析
-    - 性能優化建議
-    - 故障排除指南
-    - 立即執行
-  
-  - |
-    持續完善文檔體系，補充缺失的內容。
-    
-    要求：
-    - 版本更新說明
-    - 遷移指南
-    - 架構設計文檔
-    - 貢獻者指南
-    - 直接執行
-
-summary_prompt: |
-  請用繁體中文總結本輪工作（300字內）：
-
-  【目標】
-  構建完整的技術文檔體系
-
-  【請說明】
-  1. 新增的文檔主題
-  2. 文檔涵蓋的範圍
-  3. 代碼示例數量
-  4. 文檔結構改進
-  5. 下一步撰寫建議
-
-  然後我們換新 session 繼續撰寫。
-
-context:
-  export_last_messages: 4
-  max_context_chars: 800
-  use_last_snippets: 2
-
-display:
-  show_session_id: true
-  show_token_usage: true
-  show_timestamp: true
-  color_per_session: true
+documentation-codex:
+  task:
+    name: "文檔"
+    language: "繁體中文"
+    output_dir: "docs"
+  cli:
+    tool: "codex"
+    commands:
+      run_session: "codex exec resume --last --skip-git-repo-check"
+  opencode:
+    max_tokens: 128000
+    token_threshold: 0.7
+  execution:
+    delay: 1
+    timeout: 300
+    max_retries: 5
+  prompts:
+    - "生成項目文檔：README、API 文檔、使用指南"
+  summary_prompt: "總結本輪工作（300字內）"

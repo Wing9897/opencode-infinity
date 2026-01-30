@@ -1,5 +1,0 @@
-opencode command:
-opencode run --session {session_id}
-opencode session list
-opencode run --session ses_xxx --model openai/gpt-5.2 "message"
-

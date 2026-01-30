@@ -49,8 +49,6 @@
         .btn-success { background: linear-gradient(135deg, #00c853, #009624); color: #fff; }
         .btn-secondary { background: #3a3a5a; color: #e0e0e0; }
         .btn-secondary:hover { background: #4a4a6a; }
-        .btn-danger { background: #dc3545; color: #fff; }
-        .btn-small { padding: 6px 12px; font-size: 12px; }
         
         /* 區塊 */
         .section {
@@ -130,67 +128,6 @@
         .row { display: flex; gap: 15px; }
         .row .form-group { flex: 1; }
         
-        /* 提示詞列表 */
-        .prompt-item {
-            background: #0d0d1a;
-            border: 1px solid #3a3a5a;
-            border-radius: 8px;
-            margin-bottom: 10px;
-            overflow: hidden;
-        }
-        
-        .prompt-header {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            padding: 10px 12px;
-            background: #1a1a30;
-            border-bottom: 1px solid #3a3a5a;
-        }
-        
-        .prompt-header span { color: #00d4ff; font-size: 13px; }
-        
-        .prompt-item textarea {
-            border: none;
-            border-radius: 0;
-            min-height: 100px;
-        }
-        
-        /* 開關 */
-        .toggle-group {
-            display: flex;
-            align-items: center;
-            gap: 10px;
-        }
-        
-        .toggle {
-            position: relative;
-            width: 44px;
-            height: 24px;
-            background: #3a3a5a;
-            border-radius: 12px;
-            cursor: pointer;
-            transition: background 0.2s;
-        }
-        
-        .toggle.active { background: #00c853; }
-        
-        .toggle::after {
-            content: '';
-            position: absolute;
-            width: 18px;
-            height: 18px;
-            background: #fff;
-            border-radius: 50%;
-            top: 3px;
-            left: 3px;
-            transition: transform 0.2s;
-        }
-        
-        .toggle.active::after { transform: translateX(20px); }
-        
-        .toggle-label { color: #aaa; font-size: 13px; }
-        
         /* 滑桿 */
         .slider-group {
             display: flex;
@@ -216,7 +153,7 @@
         }
         
         .slider-value {
-            min-width: 50px;
+            min-width: 60px;
             text-align: center;
             background: #0d0d1a;
             padding: 6px 10px;
@@ -238,9 +175,7 @@
             color: #98c379;
         }
         
-        #fileInput { display: none; }
-        
-        /* 命令參考區塊 */
+        /* 命令參考 */
         .command-ref {
             background: #1a1a2e;
             border: 1px solid #2a2a4a;
@@ -253,9 +188,6 @@
             color: #00d4ff;
             font-size: 1em;
             margin-bottom: 12px;
-            display: flex;
-            align-items: center;
-            gap: 8px;
         }
         
         .cmd-item {
@@ -263,15 +195,9 @@
             border-radius: 6px;
             padding: 10px;
             margin-bottom: 8px;
-            display: flex;
-            align-items: center;
-            gap: 10px;
         }
         
-        .cmd-item:last-child { margin-bottom: 0; }
-        
         .cmd-code {
-            flex: 1;
             font-family: 'Fira Code', 'Consolas', monospace;
             font-size: 13px;
             color: #98c379;
@@ -285,32 +211,6 @@
             font-size: 12px;
             margin-top: 4px;
         }
-        
-        .btn-copy {
-            padding: 6px 12px;
-            background: #3a3a5a;
-            border: none;
-            border-radius: 4px;
-            color: #00d4ff;
-            cursor: pointer;
-            font-size: 12px;
-            transition: all 0.2s;
-        }
-        
-        .btn-copy:hover {
-            background: #4a4a6a;
-        }
-        
-        .btn-copy.copied {
-            background: #00c853;
-            color: #fff;
-        }
-        
-        @media (max-width: 600px) {
-            .row { flex-direction: column; gap: 0; }
-            .toolbar { justify-content: center; }
-            .cmd-item { flex-direction: column; align-items: stretch; }
-        }
     </style>
 </head>
 <body>
@@ -321,69 +221,38 @@
         </header>
         
         <div class="toolbar">
-            <input type="file" id="fileInput" accept=".yaml,.yml">
-            <button class="btn btn-primary" onclick="document.getElementById('fileInput').click()">📂 載入配置</button>
-            <button class="btn btn-success" onclick="exportYaml()">💾 匯出 YAML</button>
+            <button class="btn btn-primary" onclick="document.getElementById('fileInput').click()">📂 載入</button>
+            <button class="btn btn-success" onclick="saveYaml()" id="saveBtn">💾 保存</button>
+            <button class="btn btn-secondary" onclick="saveAsYaml()">💾 另存為</button>
             <button class="btn btn-secondary" onclick="showPreview()">👁️ 預覽</button>
             <button class="btn btn-secondary" onclick="resetForm()">🗑️ 清空</button>
+            <input type="file" id="fileInput" accept=".yaml,.yml" style="display: none;" onchange="loadYaml(event)">
         </div>
         
         <!-- 常用命令參考 -->
         <div class="command-ref">
             <h3>💻 常用命令參考</h3>
             <div class="cmd-item">
-                <div style="flex: 1;">
-                    <div class="cmd-code">opencode session list</div>
-                    <div class="cmd-desc">查看所有 Session 列表（查找 Session ID）</div>
-                </div>
-                <button class="btn-copy" onclick="copyCommand('opencode session list', this)">複製</button>
+                <div class="cmd-code">python3 opencode-infinity.py &lt;session_id&gt; &lt;config_name&gt;</div>
+                <div class="cmd-desc">使用指定配置運行</div>
             </div>
             <div class="cmd-item">
-                <div style="flex: 1;">
-                    <div class="cmd-code">python3 opencode-infinity.py</div>
-                    <div class="cmd-desc">創建新 Session 並開始執行（使用默認配置）</div>
-                </div>
-                <button class="btn-copy" onclick="copyCommand('python3 opencode-infinity.py', this)">複製</button>
-            </div>
-            <div class="cmd-item">
-                <div style="flex: 1;">
-                    <div class="cmd-code">python3 opencode-infinity.py &lt;session_id&gt;</div>
-                    <div class="cmd-desc">繼續指定 Session（使用默認配置）</div>
-                </div>
-                <button class="btn-copy" onclick="copyCommand('python3 opencode-infinity.py ', this)">複製</button>
-            </div>
-            <div class="cmd-item">
-                <div style="flex: 1;">
-                    <div class="cmd-code">python3 opencode-infinity.py &lt;session_id&gt; &lt;config_name&gt;</div>
-                    <div class="cmd-desc">繼續 Session 並使用指定配置（如 medical-kb）</div>
-                </div>
-                <button class="btn-copy" onclick="copyCommand('python3 opencode-infinity.py ', this)">複製</button>
-            </div>
-            <div class="cmd-item">
-                <div style="flex: 1;">
-                    <div class="cmd-code">opencode export &lt;session_id&gt;</div>
-                    <div class="cmd-desc">導出 Session 的完整對話記錄（JSON 格式）</div>
-                </div>
-                <button class="btn-copy" onclick="copyCommand('opencode export ', this)">複製</button>
+                <div class="cmd-code">python3 opencode-infinity.py ses_codex api-development-codex</div>
+                <div class="cmd-desc">Codex 範例（推薦）</div>
             </div>
         </div>
         
         <!-- 任務設置 -->
         <div class="section" id="taskSection">
             <div class="section-header" onclick="toggleSection('taskSection')">
-                <span>🎯 任務目標</span>
+                <span>🎯 任務設置</span>
                 <span class="icon">▼</span>
             </div>
             <div class="section-body">
                 <div class="form-group">
                     <label>任務名稱</label>
-                    <input type="text" id="taskName" placeholder="例如：醫療知識庫">
+                    <input type="text" id="taskName" placeholder="例如：API 開發">
                     <div class="hint">用於識別此任務的名稱</div>
-                </div>
-                <div class="form-group">
-                    <label>任務描述</label>
-                    <input type="text" id="taskDesc" placeholder="例如：自動生成家居常見症狀處理指引">
-                    <div class="hint">詳細說明此任務的目標</div>
                 </div>
                 <div class="row">
                     <div class="form-group">
@@ -396,72 +265,85 @@
                     </div>
                     <div class="form-group">
                         <label>輸出目錄</label>
-                        <input type="text" id="taskOutput" placeholder="例如：症狀">
+                        <input type="text" id="taskOutput" placeholder="例如：api" value="output">
                     </div>
                 </div>
             </div>
         </div>
         
-        <!-- AI 設置 -->
-        <div class="section" id="aiSection">
-            <div class="section-header" onclick="toggleSection('aiSection')">
-                <span>🤖 AI 模型設置</span>
+        <!-- CLI 配置 -->
+        <div class="section" id="cliSection">
+            <div class="section-header" onclick="toggleSection('cliSection')">
+                <span>🔧 CLI 工具配置</span>
                 <span class="icon">▼</span>
             </div>
             <div class="section-body">
                 <div class="form-group">
-                    <label>模型</label>
-                    <select id="model">
-                        <option value="openai/gpt-5.2-codex">openai/gpt-5.2-codex</option>
-                        <option value="openai/gpt-5.1-codex">openai/gpt-5.1-codex</option>
-                        <option value="anthropic/claude-sonnet-4">anthropic/claude-sonnet-4</option>
-                        <option value="anthropic/claude-opus-4">anthropic/claude-opus-4</option>
+                    <label>CLI 工具</label>
+                    <select id="cliTool" onchange="updateCliConfig()">
+                        <option value="opencode">OpenCode</option>
+                        <option value="claude">Claude</option>
+                        <option value="codex">Codex</option>
                     </select>
+                    <div class="hint">選擇要使用的 AI CLI 工具</div>
                 </div>
-                <div class="row">
+                
+                <div id="codexConfig" style="display: none;">
                     <div class="form-group">
-                        <label>最大 Tokens</label>
-                        <input type="number" id="maxTokens" value="128000">
+                        <label>Codex 命令配置</label>
+                        <input type="text" id="codexCommand" value="codex exec resume --last --skip-git-repo-check" readonly>
+                        <div class="hint">Codex 使用 exec resume --last 自動恢復最後的 session（包含 --skip-git-repo-check 以支持任何目錄）</div>
                     </div>
-                    <div class="form-group">
-                        <label>Token 閾值（達到後切換 Session）</label>
-                        <div class="slider-group">
-                            <input type="range" id="threshold" min="50" max="90" value="70" oninput="updateThresholdDisplay()">
-                            <span class="slider-value" id="thresholdValue">70%</span>
-                        </div>
+                </div>
+            </div>
+        </div>
+        
+        <!-- OpenCode 設置 -->
+        <div class="section" id="opencodeSection">
+            <div class="section-header" onclick="toggleSection('opencodeSection')">
+                <span>⚙️ OpenCode 設置</span>
+                <span class="icon">▼</span>
+            </div>
+            <div class="section-body">
+                <div class="form-group">
+                    <label>最大 Tokens</label>
+                    <input type="number" id="maxTokens" value="128000" min="1000" max="200000" step="1000">
+                    <div class="hint">OpenCode 的最大 token 限制</div>
+                </div>
+                <div class="form-group">
+                    <label>Token 閾值（達到後切換 Session）</label>
+                    <div class="slider-group">
+                        <input type="range" id="tokenThreshold" min="0.5" max="0.95" step="0.05" value="0.7" oninput="updateSliderValue('tokenThreshold', this.value)">
+                        <span class="slider-value" id="tokenThresholdValue">70%</span>
                     </div>
+                    <div class="hint">達到此比例時自動切換到新 Session</div>
                 </div>
             </div>
         </div>
         
         <!-- 執行設置 -->
-        <div class="section" id="execSection">
-            <div class="section-header" onclick="toggleSection('execSection')">
-                <span>⚙️ 執行設置</span>
+        <div class="section" id="executionSection">
+            <div class="section-header" onclick="toggleSection('executionSection')">
+                <span>🚀 執行設置</span>
                 <span class="icon">▼</span>
             </div>
             <div class="section-body">
                 <div class="row">
                     <div class="form-group">
                         <label>每輪延遲（秒）</label>
-                        <input type="number" id="delay" value="1" min="0">
+                        <input type="number" id="delay" value="1" min="0" max="60">
+                        <div class="hint">每輪執行之間的延遲時間</div>
                     </div>
                     <div class="form-group">
                         <label>基礎超時（秒）</label>
-                        <input type="number" id="timeout" value="300" min="60" step="60">
-                        <div class="hint">指數退避：超時後加倍等待重試（300→600→1200→2400→3600）</div>
-                    </div>
-                    <div class="form-group">
-                        <label>最大重試次數</label>
-                        <input type="number" id="maxRetries" value="5" min="0">
-                        <div class="hint">超時後自動加倍等待時間重試</div>
+                        <input type="number" id="timeout" value="300" min="60" max="3600">
+                        <div class="hint">單次執行的超時時間</div>
                     </div>
                 </div>
                 <div class="form-group">
-                    <div class="toggle-group">
-                        <div class="toggle active" id="autoContinue" onclick="toggleSwitch('autoContinue')"></div>
-                        <span class="toggle-label">執行失敗時自動繼續</span>
-                    </div>
+                    <label>最大重試次數</label>
+                    <input type="number" id="maxRetries" value="5" min="0" max="10">
+                    <div class="hint">執行失敗時自動繼續</div>
                 </div>
             </div>
         </div>
@@ -469,12 +351,21 @@
         <!-- 提示詞 -->
         <div class="section" id="promptSection">
             <div class="section-header" onclick="toggleSection('promptSection')">
-                <span>💬 提示詞（輪轉使用）</span>
+                <span>📝 提示詞（輪轉使用）</span>
                 <span class="icon">▼</span>
             </div>
             <div class="section-body">
-                <div id="promptList"></div>
-                <button class="btn btn-secondary" onclick="addPrompt()">+ 新增提示詞</button>
+                <div class="form-group">
+                    <label>提示詞內容</label>
+                    <textarea id="promptContent" placeholder="輸入你想讓 AI 執行的任務...
+
+例如：
+生成 RESTful API 服務：
+- GET/POST/PUT/DELETE /users
+- Express.js + 驗證 + 錯誤處理
+- Swagger 文檔 + 單元測試"></textarea>
+                    <div class="hint">描述你想要 AI 完成的任務（多輪會輪轉使用）</div>
+                </div>
             </div>
         </div>
         
@@ -486,217 +377,335 @@
             </div>
             <div class="section-body">
                 <div class="form-group">
-                    <textarea id="summaryPrompt" placeholder="請用繁體中文總結本輪工作..."></textarea>
-                    <div class="hint">達到 Token 閾值時，會使用此提示詞讓 AI 總結目前工作</div>
+                    <label>總結提示詞</label>
+                    <textarea id="summaryPrompt" placeholder="例如：總結本輪工作，列出完成的功能和下一步計劃">總結本輪工作（300字內）</textarea>
+                    <div class="hint">當 Token 達到閾值切換 Session 時使用</div>
                 </div>
             </div>
         </div>
         
         <!-- 預覽區 -->
-        <div class="section" id="previewSection" style="display:none;">
+        <div class="section" id="previewSection">
             <div class="section-header" onclick="toggleSection('previewSection')">
-                <span>📄 YAML 預覽</span>
+                <span>👁️ YAML 預覽</span>
                 <span class="icon">▼</span>
             </div>
             <div class="section-body">
-                <pre id="yamlPreview"></pre>
+                <pre id="yamlPreview">點擊「預覽」按鈕查看生成的 YAML 配置...</pre>
             </div>
         </div>
     </div>
 
     <script>
-        let prompts = [];
+        // 全局變量：追蹤當前載入的文件
+        let currentFileName = null;
+        let currentFilePath = null;
         
-        // 初始化
-        document.addEventListener('DOMContentLoaded', () => {
-            addPrompt();
-        });
-        
-        // 檔案載入
-        document.getElementById('fileInput').addEventListener('change', (e) => {
-            const file = e.target.files[0];
-            if (file) {
-                const reader = new FileReader();
-                reader.onload = (e) => {
-                    try {
-                        const config = jsyaml.load(e.target.result);
-                        loadConfig(config);
-                        alert('✓ 配置載入成功！');
-                    } catch (err) {
-                        alert('✗ YAML 解析失敗：' + err.message);
-                    }
-                };
-                reader.readAsText(file);
-            }
-        });
-        
-        function loadConfig(config) {
-            // 任務
-            if (config.task) {
-                document.getElementById('taskName').value = config.task.name || '';
-                document.getElementById('taskDesc').value = config.task.description || '';
-                document.getElementById('taskLang').value = config.task.language || '繁體中文';
-                document.getElementById('taskOutput').value = config.task.output_dir || '';
-            }
-            
-            // AI
-            if (config.opencode) {
-                document.getElementById('model').value = config.opencode.model || 'openai/gpt-5.2-codex';
-                document.getElementById('maxTokens').value = config.opencode.max_tokens || 128000;
-                const threshold = Math.round((config.opencode.token_threshold || 0.7) * 100);
-                document.getElementById('threshold').value = threshold;
-                updateThresholdDisplay();
-            }
-            
-            // 執行
-            if (config.execution) {
-                document.getElementById('delay').value = config.execution.delay || 1;
-                document.getElementById('timeout').value = config.execution.timeout || 300;
-                document.getElementById('maxRetries').value = config.execution.max_retries || 3;
-                setToggle('autoContinue', config.execution.auto_continue_on_error !== false);
-            }
-            
-            // 提示詞
-            prompts = [];
-            document.getElementById('promptList').innerHTML = '';
-            if (config.prompts && config.prompts.length > 0) {
-                config.prompts.forEach(p => addPrompt(p));
-            } else {
-                addPrompt();
-            }
-            
-            // 總結
-            document.getElementById('summaryPrompt').value = config.summary_prompt || '';
+        // 切換區塊
+        function toggleSection(sectionId) {
+            const section = document.getElementById(sectionId);
+            section.classList.toggle('collapsed');
         }
         
+        // 更新 CLI 配置
+        function updateCliConfig() {
+            const tool = document.getElementById('cliTool').value;
+            const codexConfig = document.getElementById('codexConfig');
+            codexConfig.style.display = tool === 'codex' ? 'block' : 'none';
+        }
+        
+        // 更新滑桿值
+        function updateSliderValue(id, value) {
+            const percent = Math.round(value * 100);
+            document.getElementById(id + 'Value').textContent = percent + '%';
+        }
+        
+        // 更新保存按鈕狀態
+        function updateSaveButton() {
+            const saveBtn = document.getElementById('saveBtn');
+            if (currentFileName) {
+                saveBtn.textContent = `💾 保存 (${currentFileName})`;
+                saveBtn.title = `保存到 ${currentFileName}`;
+            } else {
+                saveBtn.textContent = '💾 另存為';
+                saveBtn.title = '尚未載入文件，將另存為新文件';
+            }
+        }
+        
+        // 生成配置對象
         function generateConfig() {
-            return {
+            const taskName = document.getElementById('taskName').value || 'API 開發';
+            const taskLang = document.getElementById('taskLang').value;
+            const taskOutput = document.getElementById('taskOutput').value || 'output';
+            const cliTool = document.getElementById('cliTool').value;
+            const maxTokens = parseInt(document.getElementById('maxTokens').value);
+            const tokenThreshold = parseFloat(document.getElementById('tokenThreshold').value);
+            const delay = parseInt(document.getElementById('delay').value);
+            const timeout = parseInt(document.getElementById('timeout').value);
+            const maxRetries = parseInt(document.getElementById('maxRetries').value);
+            const promptContent = document.getElementById('promptContent').value || '繼續工作';
+            const summaryPrompt = document.getElementById('summaryPrompt').value || '總結本輪工作';
+            
+            // 生成配置名稱
+            const configName = `${taskName.toLowerCase().replace(/\s+/g, '-')}-${cliTool}`;
+            
+            // 基本配置
+            const config = {
                 task: {
-                    name: document.getElementById('taskName').value || '我的任務',
-                    description: document.getElementById('taskDesc').value || '',
-                    language: document.getElementById('taskLang').value,
-                    output_dir: document.getElementById('taskOutput').value || 'output'
+                    name: taskName,
+                    language: taskLang,
+                    output_dir: taskOutput
+                },
+                cli: {
+                    tool: cliTool
                 },
                 opencode: {
-                    model: document.getElementById('model').value,
-                    max_tokens: parseInt(document.getElementById('maxTokens').value) || 128000,
-                    token_threshold: parseInt(document.getElementById('threshold').value) / 100
+                    max_tokens: maxTokens,
+                    token_threshold: tokenThreshold
                 },
                 execution: {
-                    delay: parseInt(document.getElementById('delay').value) || 1,
-                    timeout: parseInt(document.getElementById('timeout').value) || 0,
-                    auto_continue_on_error: document.getElementById('autoContinue').classList.contains('active'),
-                    max_retries: parseInt(document.getElementById('maxRetries').value) || 3
+                    delay: delay,
+                    timeout: timeout,
+                    max_retries: maxRetries
                 },
-                prompts: getPrompts(),
-                summary_prompt: document.getElementById('summaryPrompt').value || '請總結本輪工作。',
-                context: {
-                    export_last_messages: 5,
-                    max_context_chars: 500,
-                    use_last_snippets: 3
+                prompts: [promptContent],
+                summary_prompt: summaryPrompt
+            };
+            
+            // Codex 特殊配置
+            if (cliTool === 'codex') {
+                config.cli.commands = {
+                    run_session: 'codex exec resume --last --skip-git-repo-check'
+                };
+            }
+            
+            return { configName, config };
+        }
+        
+        // 顯示預覽
+        function showPreview() {
+            try {
+                const { configName, config } = generateConfig();
+                const yamlConfig = {};
+                yamlConfig[configName] = config;
+                const yamlStr = jsyaml.dump(yamlConfig, { indent: 2 });
+                
+                document.getElementById('yamlPreview').textContent = yamlStr;
+                
+                // 展開預覽區
+                const previewSection = document.getElementById('previewSection');
+                previewSection.classList.remove('collapsed');
+            } catch (e) {
+                alert(`預覽失敗: ${e.message}`);
+            }
+        }
+        
+        // 保存 YAML（如果已載入文件則使用原文件名，否則另存為）
+        function saveYaml() {
+            if (currentFileName) {
+                // 已載入文件，使用原文件名保存
+                downloadYaml(currentFileName);
+            } else {
+                // 未載入文件，另存為
+                saveAsYaml();
+            }
+        }
+        
+        // 另存為 YAML
+        function saveAsYaml() {
+            try {
+                const { configName, config } = generateConfig();
+                
+                // 生成 YAML
+                const yamlConfig = {};
+                yamlConfig[configName] = config;
+                const yamlStr = jsyaml.dump(yamlConfig, { indent: 2 });
+                
+                // 提示用戶輸入文件名
+                const taskName = document.getElementById('taskName').value || 'config';
+                const defaultFileName = taskName.toLowerCase().replace(/\s+/g, '-');
+                const fileName = prompt('請輸入文件名（不含 .yaml）：', currentFileName ? currentFileName.replace('.yaml', '') : defaultFileName);
+                
+                if (fileName) {
+                    const fullFileName = fileName.endsWith('.yaml') ? fileName : `${fileName}.yaml`;
+                    downloadYaml(fullFileName, yamlStr);
+                    
+                    // 更新當前文件名
+                    currentFileName = fullFileName;
+                    updateSaveButton();
+                }
+            } catch (e) {
+                alert(`保存失敗: ${e.message}`);
+            }
+        }
+        
+        // 下載 YAML 文件
+        function downloadYaml(fileName, yamlContent = null) {
+            try {
+                // 如果沒有提供內容，生成新的
+                if (!yamlContent) {
+                    const { configName, config } = generateConfig();
+                    const yamlConfig = {};
+                    yamlConfig[configName] = config;
+                    yamlContent = jsyaml.dump(yamlConfig, { indent: 2 });
+                }
+                
+                // 下載文件
+                const blob = new Blob([yamlContent], { type: 'text/yaml' });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = fileName;
+                a.click();
+                URL.revokeObjectURL(url);
+                
+                alert(`✓ 已保存: ${fileName}\n\n請將文件放到 tasks_yaml/ 目錄`);
+            } catch (e) {
+                alert(`保存失敗: ${e.message}`);
+            }
+        }
+        
+        // 載入 YAML
+        function loadYaml(event) {
+            const file = event.target.files[0];
+            if (!file) return;
+            
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                try {
+                    const yamlContent = e.target.result;
+                    const data = jsyaml.load(yamlContent);
+                    
+                    console.log('載入的 YAML 數據:', data);
+                    
+                    // 找到第一個配置（可能是嵌套的）
+                    let config = data;
+                    const keys = Object.keys(data);
+                    console.log('頂層鍵:', keys);
+                    
+                    if (keys.length === 1 && typeof data[keys[0]] === 'object') {
+                        config = data[keys[0]];
+                        console.log('使用嵌套配置:', keys[0]);
+                    } else if (keys.length > 1) {
+                        // 多個配置，使用第一個
+                        config = data[keys[0]];
+                        console.log('多個配置，使用第一個:', keys[0]);
+                    }
+                    
+                    console.log('最終配置:', config);
+                    
+                    // 填充表單
+                    if (config.task) {
+                        if (config.task.name) {
+                            document.getElementById('taskName').value = config.task.name;
+                            console.log('設置 taskName:', config.task.name);
+                        }
+                        if (config.task.language) {
+                            document.getElementById('taskLang').value = config.task.language;
+                            console.log('設置 taskLang:', config.task.language);
+                        }
+                        if (config.task.output_dir) {
+                            document.getElementById('taskOutput').value = config.task.output_dir;
+                            console.log('設置 taskOutput:', config.task.output_dir);
+                        }
+                    }
+                    
+                    if (config.cli) {
+                        if (config.cli.tool) {
+                            document.getElementById('cliTool').value = config.cli.tool;
+                            updateCliConfig();
+                            console.log('設置 cliTool:', config.cli.tool);
+                        }
+                    }
+                    
+                    if (config.opencode) {
+                        if (config.opencode.max_tokens) {
+                            document.getElementById('maxTokens').value = config.opencode.max_tokens;
+                            console.log('設置 maxTokens:', config.opencode.max_tokens);
+                        }
+                        if (config.opencode.token_threshold !== undefined) {
+                            const threshold = config.opencode.token_threshold;
+                            document.getElementById('tokenThreshold').value = threshold;
+                            updateSliderValue('tokenThreshold', threshold);
+                            console.log('設置 tokenThreshold:', threshold);
+                        }
+                    }
+                    
+                    if (config.execution) {
+                        if (config.execution.delay !== undefined) {
+                            document.getElementById('delay').value = config.execution.delay;
+                            console.log('設置 delay:', config.execution.delay);
+                        }
+                        if (config.execution.timeout) {
+                            document.getElementById('timeout').value = config.execution.timeout;
+                            console.log('設置 timeout:', config.execution.timeout);
+                        }
+                        if (config.execution.max_retries !== undefined) {
+                            document.getElementById('maxRetries').value = config.execution.max_retries;
+                            console.log('設置 maxRetries:', config.execution.max_retries);
+                        }
+                    }
+                    
+                    if (config.prompts && config.prompts.length > 0) {
+                        const prompt = config.prompts[0];
+                        const promptText = typeof prompt === 'string' ? prompt : (prompt.content || '');
+                        document.getElementById('promptContent').value = promptText;
+                        console.log('設置 promptContent:', promptText.substring(0, 50) + '...');
+                    }
+                    
+                    if (config.summary_prompt) {
+                        document.getElementById('summaryPrompt').value = config.summary_prompt;
+                        console.log('設置 summaryPrompt:', config.summary_prompt);
+                    }
+                    
+                    // 記錄當前文件名
+                    currentFileName = file.name;
+                    updateSaveButton();
+                    
+                    alert(`✓ 已載入配置: ${file.name}\n\n配置名稱: ${keys[0] || 'unknown'}\n任務: ${config.task?.name || 'N/A'}`);
+                    
+                    // 自動顯示預覽
+                    showPreview();
+                    
+                } catch (e) {
+                    console.error('載入錯誤:', e);
+                    alert(`載入失敗: ${e.message}\n\n請檢查瀏覽器控制台查看詳細錯誤`);
                 }
             };
+            reader.readAsText(file, 'UTF-8');
+            
+            // 重置 input，允許重複載入同一文件
+            event.target.value = '';
         }
         
-        function getPrompts() {
-            const list = [];
-            document.querySelectorAll('.prompt-textarea').forEach(t => {
-                if (t.value.trim()) list.push(t.value.trim());
-            });
-            return list.length > 0 ? list : ['繼續之前的任務，無需詢問直接執行。'];
-        }
-        
-        function addPrompt(text = '') {
-            const idx = document.querySelectorAll('.prompt-item').length + 1;
-            const div = document.createElement('div');
-            div.className = 'prompt-item';
-            div.innerHTML = `
-                <div class="prompt-header">
-                    <span>提示詞 #${idx}</span>
-                    <button class="btn btn-danger btn-small" onclick="removePrompt(this)">刪除</button>
-                </div>
-                <textarea class="prompt-textarea" placeholder="輸入提示詞內容...">${text}</textarea>
-            `;
-            document.getElementById('promptList').appendChild(div);
-        }
-        
-        function removePrompt(btn) {
-            if (document.querySelectorAll('.prompt-item').length > 1) {
-                btn.closest('.prompt-item').remove();
-                renumberPrompts();
-            }
-        }
-        
-        function renumberPrompts() {
-            document.querySelectorAll('.prompt-item .prompt-header span').forEach((s, i) => {
-                s.textContent = `提示詞 #${i + 1}`;
-            });
-        }
-        
-        function exportYaml() {
-            const config = generateConfig();
-            const yaml = jsyaml.dump(config, { indent: 2, lineWidth: -1, noRefs: true });
-            const blob = new Blob([yaml], { type: 'text/yaml' });
-            const url = URL.createObjectURL(blob);
-            const a = document.createElement('a');
-            a.href = url;
-            a.download = (document.getElementById('taskName').value || 'config').replace(/\s+/g, '-').toLowerCase() + '.yaml';
-            a.click();
-            URL.revokeObjectURL(url);
-        }
-        
-        function showPreview() {
-            const section = document.getElementById('previewSection');
-            section.style.display = 'block';
-            section.classList.remove('collapsed');
-            const config = generateConfig();
-            document.getElementById('yamlPreview').textContent = jsyaml.dump(config, { indent: 2, lineWidth: -1 });
-            section.scrollIntoView({ behavior: 'smooth' });
-        }
-        
-        function toggleSection(id) {
-            document.getElementById(id).classList.toggle('collapsed');
-        }
-        
-        function toggleSwitch(id) {
-            document.getElementById(id).classList.toggle('active');
-        }
-        
-        function setToggle(id, active) {
-            const el = document.getElementById(id);
-            if (active) el.classList.add('active');
-            else el.classList.remove('active');
-        }
-        
-        function updateThresholdDisplay() {
-            document.getElementById('thresholdValue').textContent = document.getElementById('threshold').value + '%';
-        }
-        
+        // 重置表單
         function resetForm() {
-            if (confirm('確定要清空所有內容？')) {
-                loadConfig({
-                    task: { name: '', description: '', language: '繁體中文', output_dir: '' },
-                    opencode: { model: 'openai/gpt-5.2-codex', max_tokens: 128000, token_threshold: 0.7 },
-                    execution: { delay: 1, timeout: 300, auto_continue_on_error: true, max_retries: 5 },
-                    prompts: [''],
-                    summary_prompt: ''
-                });
+            if (confirm('確定要清空所有設置嗎？')) {
+                document.getElementById('taskName').value = '';
+                document.getElementById('taskLang').value = '繁體中文';
+                document.getElementById('taskOutput').value = 'output';
+                document.getElementById('cliTool').value = 'opencode';
+                document.getElementById('maxTokens').value = '128000';
+                document.getElementById('tokenThreshold').value = '0.7';
+                document.getElementById('delay').value = '1';
+                document.getElementById('timeout').value = '300';
+                document.getElementById('maxRetries').value = '5';
+                document.getElementById('promptContent').value = '';
+                document.getElementById('summaryPrompt').value = '總結本輪工作（300字內）';
+                document.getElementById('yamlPreview').textContent = '點擊「預覽」按鈕查看生成的 YAML 配置...';
+                updateSliderValue('tokenThreshold', 0.7);
+                updateCliConfig();
+                
+                // 清除當前文件名
+                currentFileName = null;
+                updateSaveButton();
             }
         }
         
-        function copyCommand(text, button) {
-            navigator.clipboard.writeText(text).then(() => {
-                const originalText = button.textContent;
-                button.textContent = '✓ 已複製';
-                button.classList.add('copied');
-                setTimeout(() => {
-                    button.textContent = originalText;
-                    button.classList.remove('copied');
-                }, 2000);
-            }).catch(err => {
-                alert('複製失敗，請手動複製命令');
-            });
-        }
+        // 初始化
+        updateCliConfig();
+        updateSliderValue('tokenThreshold', 0.7);
+        updateSaveButton();
     </script>
 </body>
 </html>
