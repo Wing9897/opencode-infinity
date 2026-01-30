@@ -211,6 +211,44 @@
             font-size: 12px;
             margin-top: 4px;
         }
+        
+        /* 提示詞項目 */
+        .prompt-item {
+            background: #0d0d1a;
+            border: 1px solid #3a3a5a;
+            border-radius: 6px;
+            padding: 15px;
+            margin-bottom: 10px;
+            position: relative;
+        }
+        
+        .prompt-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 10px;
+        }
+        
+        .prompt-label {
+            color: #00d4ff;
+            font-size: 13px;
+            font-weight: 500;
+        }
+        
+        .btn-remove {
+            background: #c82333;
+            color: #fff;
+            border: none;
+            border-radius: 4px;
+            padding: 4px 10px;
+            font-size: 12px;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        
+        .btn-remove:hover {
+            background: #e02535;
+        }
     </style>
 </head>
 <body>
@@ -221,7 +259,7 @@
         </header>
         
         <div class="toolbar">
-            <button class="btn btn-primary" onclick="document.getElementById('fileInput').click()">📂 載入</button>
+            <button class="btn btn-primary" onclick="$('fileInput').click()">📂 載入</button>
             <button class="btn btn-success" onclick="saveYaml()" id="saveBtn">💾 保存</button>
             <button class="btn btn-secondary" onclick="saveAsYaml()">💾 另存為</button>
             <button class="btn btn-secondary" onclick="showPreview()">👁️ 預覽</button>
@@ -232,13 +270,31 @@
         <!-- 常用命令參考 -->
         <div class="command-ref">
             <h3>💻 常用命令參考</h3>
+            
             <div class="cmd-item">
                 <div class="cmd-code">python3 opencode-infinity.py &lt;session_id&gt; &lt;config_name&gt;</div>
-                <div class="cmd-desc">使用指定配置運行</div>
+                <div class="cmd-desc">基本用法：使用指定配置運行</div>
             </div>
+            
             <div class="cmd-item">
-                <div class="cmd-code">python3 opencode-infinity.py ses_codex api-development-codex</div>
-                <div class="cmd-desc">Codex 範例（推薦）</div>
+                <div class="cmd-code">python3 opencode-infinity.py ses_open opencode-example</div>
+                <div class="cmd-desc">OpenCode 範例 - 通用任務自動執行</div>
+            </div>
+            
+            <div class="cmd-item">
+                <div class="cmd-code">python3 opencode-infinity.py ses_codex codex-example</div>
+                <div class="cmd-desc">Codex 範例 - 7x24 持續運行（推薦）</div>
+            </div>
+            
+            <div style="margin-top: 15px; padding: 10px; background: #0d0d1a; border-radius: 6px; border-left: 3px solid #00d4ff;">
+                <div style="color: #00d4ff; font-weight: 600; margin-bottom: 5px;">💡 提示</div>
+                <div style="color: #888; font-size: 12px; line-height: 1.6;">
+                    • Session ID 可以自訂（例如：ses_open, ses_codex）<br>
+                    • 配置名稱支持三種格式：配置名、文件名、路徑<br>
+                    • 使用 Ctrl+C 停止執行並查看統計信息<br>
+                    • 運行中可隨時修改 YAML 配置，每輪自動熱更新<br>
+                    • 所有配置文件位於 tasks_yaml/ 目錄
+                </div>
             </div>
         </div>
         
@@ -253,6 +309,11 @@
                     <label>任務名稱</label>
                     <input type="text" id="taskName" placeholder="例如：API 開發">
                     <div class="hint">用於識別此任務的名稱</div>
+                </div>
+                <div class="form-group">
+                    <label>任務描述</label>
+                    <input type="text" id="taskDesc" placeholder="例如：生成 RESTful API 服務">
+                    <div class="hint">簡短描述此任務的目標（可選）</div>
                 </div>
                 <div class="row">
                     <div class="form-group">
@@ -306,6 +367,11 @@
             </div>
             <div class="section-body">
                 <div class="form-group">
+                    <label>模型選擇</label>
+                    <input type="text" id="modelName" placeholder="例如：openai/gpt-5.2-codex" value="default">
+                    <div class="hint">指定使用的 AI 模型（可選，留空使用默認）</div>
+                </div>
+                <div class="form-group">
                     <label>最大 Tokens</label>
                     <input type="number" id="maxTokens" value="128000" min="1000" max="200000" step="1000">
                     <div class="hint">OpenCode 的最大 token 限制</div>
@@ -343,7 +409,51 @@
                 <div class="form-group">
                     <label>最大重試次數</label>
                     <input type="number" id="maxRetries" value="5" min="0" max="10">
-                    <div class="hint">執行失敗時自動繼續</div>
+                    <div class="hint">執行失敗時的最大重試次數</div>
+                </div>
+                <div class="form-group">
+                    <label>最大輪次（0 = 無限制）</label>
+                    <input type="number" id="maxRounds" value="0" min="0" max="10000">
+                    <div class="hint">達到指定輪次後自動停止（0 表示無限運行）</div>
+                </div>
+                <div class="form-group">
+                    <label>錯誤時自動繼續</label>
+                    <select id="autoContinue">
+                        <option value="true">是</option>
+                        <option value="false">否</option>
+                    </select>
+                    <div class="hint">執行失敗時是否自動繼續下一輪</div>
+                </div>
+            </div>
+        </div>
+        
+        <!-- 顯示設置 -->
+        <div class="section" id="displaySection">
+            <div class="section-header" onclick="toggleSection('displaySection')">
+                <span>🎨 顯示設置</span>
+                <span class="icon">▼</span>
+            </div>
+            <div class="section-body">
+                <div class="form-group">
+                    <label>顯示 Session ID</label>
+                    <select id="showSessionId">
+                        <option value="true">是</option>
+                        <option value="false">否</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>顯示 Token 使用量</label>
+                    <select id="showTokenUsage">
+                        <option value="true">是</option>
+                        <option value="false">否</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>顯示時間戳</label>
+                    <select id="showTimestamp">
+                        <option value="true">是</option>
+                        <option value="false">否</option>
+                    </select>
                 </div>
             </div>
         </div>
@@ -355,17 +465,11 @@
                 <span class="icon">▼</span>
             </div>
             <div class="section-body">
-                <div class="form-group">
-                    <label>提示詞內容</label>
-                    <textarea id="promptContent" placeholder="輸入你想讓 AI 執行的任務...
-
-例如：
-生成 RESTful API 服務：
-- GET/POST/PUT/DELETE /users
-- Express.js + 驗證 + 錯誤處理
-- Swagger 文檔 + 單元測試"></textarea>
-                    <div class="hint">描述你想要 AI 完成的任務（多輪會輪轉使用）</div>
+                <div id="promptsContainer">
+                    <!-- 提示詞會動態添加到這裡 -->
                 </div>
+                <button class="btn btn-secondary" onclick="addPrompt()" style="margin-top: 10px;">➕ 添加提示詞</button>
+                <div class="hint" style="margin-top: 10px;">多個提示詞會輪轉使用，避免 AI 感到重複</div>
             </div>
         </div>
         
@@ -400,29 +504,92 @@
         // 全局變量：追蹤當前載入的文件
         let currentFileName = null;
         let currentFilePath = null;
+        let promptCounter = 0;  // 提示詞計數器
+        
+        // DOM 操作輔助函數
+        const $ = (id) => document.getElementById(id);
+        const getValue = (id) => $(id)?.value || '';
+        const setValue = (id, value) => { if ($(id)) $(id).value = value; };
+        const getIntValue = (id, defaultVal = 0) => parseInt(getValue(id)) || defaultVal;
+        const getFloatValue = (id, defaultVal = 0) => parseFloat(getValue(id)) || defaultVal;
+        const getBoolValue = (id) => getValue(id) === 'true';
+        
+        // 添加提示詞
+        function addPrompt(content = '') {
+            promptCounter++;
+            const container = $('promptsContainer');
+            
+            const promptItem = document.createElement('div');
+            promptItem.className = 'prompt-item';
+            promptItem.id = `prompt-${promptCounter}`;
+            
+            promptItem.innerHTML = `
+                <div class="prompt-header">
+                    <span class="prompt-label">提示詞 #${promptCounter}</span>
+                    <button class="btn-remove" onclick="removePrompt(${promptCounter})">🗑️ 刪除</button>
+                </div>
+                <textarea class="prompt-textarea" placeholder="輸入你想讓 AI 執行的任務...
+
+例如：
+生成 RESTful API 服務：
+- GET/POST/PUT/DELETE /users
+- Express.js + 驗證 + 錯誤處理
+- Swagger 文檔 + 單元測試">${content}</textarea>
+            `;
+            
+            container.appendChild(promptItem);
+        }
+        
+        // 刪除提示詞
+        function removePrompt(id) {
+            const promptItem = $(`prompt-${id}`);
+            if (promptItem) {
+                const container = $('promptsContainer');
+                if (container.children.length <= 1) {
+                    alert('至少需要保留一個提示詞');
+                    return;
+                }
+                promptItem.remove();
+            }
+        }
+        
+        // 獲取所有提示詞
+        function getAllPrompts() {
+            const textareas = document.querySelectorAll('.prompt-textarea');
+            const prompts = [];
+            textareas.forEach(textarea => {
+                const content = textarea.value.trim();
+                if (content) {
+                    prompts.push(content);
+                }
+            });
+            return prompts.length > 0 ? prompts : ['繼續工作'];
+        }
         
         // 切換區塊
         function toggleSection(sectionId) {
-            const section = document.getElementById(sectionId);
-            section.classList.toggle('collapsed');
+            $(sectionId)?.classList.toggle('collapsed');
         }
         
         // 更新 CLI 配置
         function updateCliConfig() {
-            const tool = document.getElementById('cliTool').value;
-            const codexConfig = document.getElementById('codexConfig');
-            codexConfig.style.display = tool === 'codex' ? 'block' : 'none';
+            const tool = getValue('cliTool');
+            const codexConfig = $('codexConfig');
+            if (codexConfig) codexConfig.style.display = tool === 'codex' ? 'block' : 'none';
         }
         
         // 更新滑桿值
         function updateSliderValue(id, value) {
             const percent = Math.round(value * 100);
-            document.getElementById(id + 'Value').textContent = percent + '%';
+            const elem = $(`${id}Value`);
+            if (elem) elem.textContent = percent + '%';
         }
         
         // 更新保存按鈕狀態
         function updateSaveButton() {
-            const saveBtn = document.getElementById('saveBtn');
+            const saveBtn = $('saveBtn');
+            if (!saveBtn) return;
+            
             if (currentFileName) {
                 saveBtn.textContent = `💾 保存 (${currentFileName})`;
                 saveBtn.title = `保存到 ${currentFileName}`;
@@ -434,17 +601,24 @@
         
         // 生成配置對象
         function generateConfig() {
-            const taskName = document.getElementById('taskName').value || 'API 開發';
-            const taskLang = document.getElementById('taskLang').value;
-            const taskOutput = document.getElementById('taskOutput').value || 'output';
-            const cliTool = document.getElementById('cliTool').value;
-            const maxTokens = parseInt(document.getElementById('maxTokens').value);
-            const tokenThreshold = parseFloat(document.getElementById('tokenThreshold').value);
-            const delay = parseInt(document.getElementById('delay').value);
-            const timeout = parseInt(document.getElementById('timeout').value);
-            const maxRetries = parseInt(document.getElementById('maxRetries').value);
-            const promptContent = document.getElementById('promptContent').value || '繼續工作';
-            const summaryPrompt = document.getElementById('summaryPrompt').value || '總結本輪工作';
+            const taskName = getValue('taskName') || 'API 開發';
+            const taskDesc = getValue('taskDesc');
+            const taskLang = getValue('taskLang');
+            const taskOutput = getValue('taskOutput') || 'output';
+            const cliTool = getValue('cliTool');
+            const modelName = getValue('modelName') || 'default';
+            const maxTokens = getIntValue('maxTokens', 128000);
+            const tokenThreshold = getFloatValue('tokenThreshold', 0.7);
+            const delay = getIntValue('delay', 1);
+            const timeout = getIntValue('timeout', 300);
+            const maxRetries = getIntValue('maxRetries', 5);
+            const maxRounds = getIntValue('maxRounds', 0);
+            const autoContinue = getBoolValue('autoContinue');
+            const showSessionId = getBoolValue('showSessionId');
+            const showTokenUsage = getBoolValue('showTokenUsage');
+            const showTimestamp = getBoolValue('showTimestamp');
+            const prompts = getAllPrompts();
+            const summaryPrompt = getValue('summaryPrompt') || '總結本輪工作';
             
             // 生成配置名稱
             const configName = `${taskName.toLowerCase().replace(/\s+/g, '-')}-${cliTool}`;
@@ -466,11 +640,22 @@
                 execution: {
                     delay: delay,
                     timeout: timeout,
-                    max_retries: maxRetries
+                    max_retries: maxRetries,
+                    max_rounds: maxRounds,
+                    auto_continue_on_error: autoContinue
                 },
-                prompts: [promptContent],
+                display: {
+                    show_session_id: showSessionId,
+                    show_token_usage: showTokenUsage,
+                    show_timestamp: showTimestamp
+                },
+                prompts: prompts,
                 summary_prompt: summaryPrompt
             };
+            
+            // 添加可選字段
+            if (taskDesc) config.task.description = taskDesc;
+            if (modelName && modelName !== 'default') config.opencode.model = modelName;
             
             // Codex 特殊配置
             if (cliTool === 'codex') {
@@ -490,11 +675,10 @@
                 yamlConfig[configName] = config;
                 const yamlStr = jsyaml.dump(yamlConfig, { indent: 2 });
                 
-                document.getElementById('yamlPreview').textContent = yamlStr;
+                $('yamlPreview').textContent = yamlStr;
                 
                 // 展開預覽區
-                const previewSection = document.getElementById('previewSection');
-                previewSection.classList.remove('collapsed');
+                $('previewSection')?.classList.remove('collapsed');
             } catch (e) {
                 alert(`預覽失敗: ${e.message}`);
             }
@@ -522,7 +706,7 @@
                 const yamlStr = jsyaml.dump(yamlConfig, { indent: 2 });
                 
                 // 提示用戶輸入文件名
-                const taskName = document.getElementById('taskName').value || 'config';
+                const taskName = getValue('taskName') || 'config';
                 const defaultFileName = taskName.toLowerCase().replace(/\s+/g, '-');
                 const fileName = prompt('請輸入文件名（不含 .yaml）：', currentFileName ? currentFileName.replace('.yaml', '') : defaultFileName);
                 
@@ -573,98 +757,60 @@
             const reader = new FileReader();
             reader.onload = function(e) {
                 try {
-                    const yamlContent = e.target.result;
-                    const data = jsyaml.load(yamlContent);
-                    
-                    console.log('載入的 YAML 數據:', data);
-                    
-                    // 找到第一個配置（可能是嵌套的）
-                    let config = data;
+                    const data = jsyaml.load(e.target.result);
                     const keys = Object.keys(data);
-                    console.log('頂層鍵:', keys);
                     
-                    if (keys.length === 1 && typeof data[keys[0]] === 'object') {
-                        config = data[keys[0]];
-                        console.log('使用嵌套配置:', keys[0]);
-                    } else if (keys.length > 1) {
-                        // 多個配置，使用第一個
-                        config = data[keys[0]];
-                        console.log('多個配置，使用第一個:', keys[0]);
-                    }
+                    // 提取配置（支持嵌套和直接配置）
+                    const config = (keys.length === 1 && typeof data[keys[0]] === 'object') ? data[keys[0]] : 
+                                   (keys.length > 1) ? data[keys[0]] : data;
                     
-                    console.log('最終配置:', config);
+                    // 解構配置對象
+                    const { task = {}, cli = {}, opencode = {}, execution = {}, display = {} } = config;
                     
                     // 填充表單
-                    if (config.task) {
-                        if (config.task.name) {
-                            document.getElementById('taskName').value = config.task.name;
-                            console.log('設置 taskName:', config.task.name);
-                        }
-                        if (config.task.language) {
-                            document.getElementById('taskLang').value = config.task.language;
-                            console.log('設置 taskLang:', config.task.language);
-                        }
-                        if (config.task.output_dir) {
-                            document.getElementById('taskOutput').value = config.task.output_dir;
-                            console.log('設置 taskOutput:', config.task.output_dir);
-                        }
+                    setValue('taskName', task.name);
+                    setValue('taskDesc', task.description);
+                    setValue('taskLang', task.language);
+                    setValue('taskOutput', task.output_dir);
+                    
+                    if (cli.tool) {
+                        setValue('cliTool', cli.tool);
+                        updateCliConfig();
                     }
                     
-                    if (config.cli) {
-                        if (config.cli.tool) {
-                            document.getElementById('cliTool').value = config.cli.tool;
-                            updateCliConfig();
-                            console.log('設置 cliTool:', config.cli.tool);
-                        }
+                    setValue('modelName', opencode.model);
+                    setValue('maxTokens', opencode.max_tokens);
+                    if (opencode.token_threshold !== undefined) {
+                        setValue('tokenThreshold', opencode.token_threshold);
+                        updateSliderValue('tokenThreshold', opencode.token_threshold);
                     }
                     
-                    if (config.opencode) {
-                        if (config.opencode.max_tokens) {
-                            document.getElementById('maxTokens').value = config.opencode.max_tokens;
-                            console.log('設置 maxTokens:', config.opencode.max_tokens);
-                        }
-                        if (config.opencode.token_threshold !== undefined) {
-                            const threshold = config.opencode.token_threshold;
-                            document.getElementById('tokenThreshold').value = threshold;
-                            updateSliderValue('tokenThreshold', threshold);
-                            console.log('設置 tokenThreshold:', threshold);
-                        }
+                    setValue('delay', execution.delay);
+                    setValue('timeout', execution.timeout);
+                    setValue('maxRetries', execution.max_retries);
+                    setValue('maxRounds', execution.max_rounds || 0);
+                    setValue('autoContinue', execution.auto_continue_on_error?.toString());
+                    
+                    setValue('showSessionId', display.show_session_id?.toString());
+                    setValue('showTokenUsage', display.show_token_usage?.toString());
+                    setValue('showTimestamp', display.show_timestamp?.toString());
+                    
+                    // 載入提示詞
+                    $('promptsContainer').innerHTML = '';
+                    promptCounter = 0;
+                    if (config.prompts?.length > 0) {
+                        config.prompts.forEach(p => addPrompt(typeof p === 'string' ? p : (p.content || '')));
+                    } else {
+                        addPrompt('');
                     }
                     
-                    if (config.execution) {
-                        if (config.execution.delay !== undefined) {
-                            document.getElementById('delay').value = config.execution.delay;
-                            console.log('設置 delay:', config.execution.delay);
-                        }
-                        if (config.execution.timeout) {
-                            document.getElementById('timeout').value = config.execution.timeout;
-                            console.log('設置 timeout:', config.execution.timeout);
-                        }
-                        if (config.execution.max_retries !== undefined) {
-                            document.getElementById('maxRetries').value = config.execution.max_retries;
-                            console.log('設置 maxRetries:', config.execution.max_retries);
-                        }
-                    }
+                    setValue('summaryPrompt', config.summary_prompt);
                     
-                    if (config.prompts && config.prompts.length > 0) {
-                        const prompt = config.prompts[0];
-                        const promptText = typeof prompt === 'string' ? prompt : (prompt.content || '');
-                        document.getElementById('promptContent').value = promptText;
-                        console.log('設置 promptContent:', promptText.substring(0, 50) + '...');
-                    }
-                    
-                    if (config.summary_prompt) {
-                        document.getElementById('summaryPrompt').value = config.summary_prompt;
-                        console.log('設置 summaryPrompt:', config.summary_prompt);
-                    }
-                    
-                    // 記錄當前文件名
+                    // 更新狀態
                     currentFileName = file.name;
                     updateSaveButton();
                     
-                    alert(`✓ 已載入配置: ${file.name}\n\n配置名稱: ${keys[0] || 'unknown'}\n任務: ${config.task?.name || 'N/A'}`);
-                    
-                    // 自動顯示預覽
+                    alert(`✓ 已載入配置: ${file.name}\n\n配置名稱: ${keys[0] || 'unknown'}\n任務: ${task.name || 'N/A'}`);
                     showPreview();
                     
                 } catch (e) {
@@ -673,26 +819,30 @@
                 }
             };
             reader.readAsText(file, 'UTF-8');
-            
-            // 重置 input，允許重複載入同一文件
             event.target.value = '';
         }
         
         // 重置表單
         function resetForm() {
             if (confirm('確定要清空所有設置嗎？')) {
-                document.getElementById('taskName').value = '';
-                document.getElementById('taskLang').value = '繁體中文';
-                document.getElementById('taskOutput').value = 'output';
-                document.getElementById('cliTool').value = 'opencode';
-                document.getElementById('maxTokens').value = '128000';
-                document.getElementById('tokenThreshold').value = '0.7';
-                document.getElementById('delay').value = '1';
-                document.getElementById('timeout').value = '300';
-                document.getElementById('maxRetries').value = '5';
-                document.getElementById('promptContent').value = '';
-                document.getElementById('summaryPrompt').value = '總結本輪工作（300字內）';
-                document.getElementById('yamlPreview').textContent = '點擊「預覽」按鈕查看生成的 YAML 配置...';
+                // 重置所有表單值
+                const defaults = {
+                    taskName: '', taskDesc: '', taskLang: '繁體中文', taskOutput: 'output',
+                    cliTool: 'opencode', modelName: 'default', maxTokens: '128000',
+                    tokenThreshold: '0.7', delay: '1', timeout: '300', maxRetries: '5',
+                    maxRounds: '0',
+                    autoContinue: 'true', showSessionId: 'true', showTokenUsage: 'true',
+                    showTimestamp: 'true', summaryPrompt: '總結本輪工作（300字內）'
+                };
+                
+                Object.entries(defaults).forEach(([id, value]) => setValue(id, value));
+                
+                // 重置提示詞
+                $('promptsContainer').innerHTML = '';
+                promptCounter = 0;
+                addPrompt('');
+                
+                $('yamlPreview').textContent = '點擊「預覽」按鈕查看生成的 YAML 配置...';
                 updateSliderValue('tokenThreshold', 0.7);
                 updateCliConfig();
                 
@@ -706,6 +856,7 @@
         updateCliConfig();
         updateSliderValue('tokenThreshold', 0.7);
         updateSaveButton();
+        addPrompt('');  // 添加第一個提示詞
     </script>
 </body>
 </html>

@@ -1,0 +1,69 @@
+# ==========================================
+# Codex 通用配置範例
+# ==========================================
+# 這是一個全面的 Codex 配置範例，展示所有可用選項
+# 使用: python3 opencode-infinity.py <session_id> codex-example
+#
+# 注意：Codex 不支持 Token 統計，使用輪次策略
+
+codex-example:
+  # 任務配置
+  task:
+    name: "通用任務"
+    description: "Codex 自動執行範例 - 7x24 持續運行，可根據需求修改提示詞"
+    language: "繁體中文"
+    output_dir: "output"
+  
+  # CLI 工具配置
+  cli:
+    tool: "codex"
+    commands:
+      run_session: "codex exec resume --last --skip-git-repo-check"
+  
+  # OpenCode 設置（Codex 不支持 Token 統計，這些設置不會生效）
+  opencode:
+    model: "openai/gpt-5.2-codex"  # 指定 Codex 模型
+  
+  # 執行設置
+  execution:
+    delay: 1                        # 每輪延遲（秒）
+    timeout: 300                    # 基礎超時（秒）
+    max_retries: 5                  # 最大重試次數
+    auto_continue_on_error: true    # 錯誤時自動繼續
+    max_rounds: 0                   # 最大輪次（0 = 無限制）
+  
+  # 顯示設置
+  display:
+    show_session_id: true
+    show_token_usage: false         # Codex 不支持 Token 統計
+    show_timestamp: true
+  
+  # 提示詞（輪轉使用，避免 AI 重複）
+  prompts:
+    - |
+      生成實用工具代碼：
+      - 創建通用函數庫
+      - 包含完整文檔
+      - 添加單元測試
+      - 確保代碼質量
+    - |
+      優化現有代碼：
+      - 改進代碼結構
+      - 提升性能
+      - 增強錯誤處理
+      - 補充註釋
+    - |
+      完善項目文檔：
+      - 更新 README
+      - 添加使用範例
+      - 補充 API 說明
+      - 編寫最佳實踐
+  
+  # 總結提示詞（Codex 不支持自動切換 Session，此配置不會使用）
+  summary_prompt: |
+    請用繁體中文總結本輪工作（300字內）：
+    1. 完成了哪些功能
+    2. 主要改進點
+    3. 下一步建議
+
+

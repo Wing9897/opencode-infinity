@@ -24,6 +24,7 @@ except ImportError:
 # ==================== 顏色輸出 ====================
 
 class C:
+    """ANSI 顏色代碼"""
     R = '\033[0m'   # 重置
     B = '\033[94m'  # 藍
     G = '\033[92m'  # 綠
@@ -66,7 +67,7 @@ class CLIAdapter:
             },
             'codex': {
                 'run': ['codex', 'run', '--skip-git-repo-check'],
-                'run_session': ['codex', 'run', '--session', '--skip-git-repo-check'],
+                'run_session': ['codex', 'exec', 'resume', '--last', '--skip-git-repo-check'],
             },
             'copilot': {
                 'run': ['gh', 'copilot', 'explain'],
@@ -124,88 +125,61 @@ def load_config(config_input):
     3. 相對路徑：tasks_yaml/medical-kb.yaml
     4. 絕對路徑：/home/user/config.yaml
     """
-    config_file = None
-    config_name = None
-    
-    # 方法 1: 檢查是否為文件路徑（包含 / 或 .yaml）
-    if '/' in config_input or config_input.endswith('.yaml') or config_input.endswith('.yml'):
-        # 處理文件路徑
+    # 確定配置文件路徑
+    if '/' in config_input or config_input.endswith(('.yaml', '.yml')):
+        # 文件路徑模式
         if config_input.startswith('/'):
-            # 絕對路徑
             config_file = Path(config_input)
         elif config_input.startswith('tasks_yaml/'):
-            # 相對路徑（已包含目錄）
             config_file = Path(config_input)
         else:
-            # 只有文件名，添加 tasks_yaml/ 前綴
             config_file = Path(f'tasks_yaml/{config_input}')
-        
-        if not config_file.exists():
-            err(f"配置文件不存在: {config_file}")
-            sys.exit(1)
-        
-        # 從文件名提取配置名稱（去掉 .yaml 後綴）
         config_name = config_file.stem
-        
     else:
-        # 方法 2: 配置名稱（不包含路徑和後綴）
+        # 配置名稱模式
         config_name = config_input
-        
-        # 驗證配置名稱
         if not re.match(r'^[a-zA-Z0-9_-]+$', config_name):
             err(f"無效的配置名稱: {config_name}")
             sys.exit(1)
         
-        # 嘗試直接配置文件
+        # 查找配置文件
         config_file = Path(f'tasks_yaml/{config_name}.yaml')
-        if not config_file.exists():
+        if not config_file.exists() and '-' in config_name:
             # 嘗試嵌套配置
-            if '-' in config_name:
-                parts = config_name.split('-')
-                for i in range(len(parts) - 1, 0, -1):
-                    base_name = '-'.join(parts[:i])
-                    base_file = Path(f'tasks_yaml/{base_name}.yaml')
-                    
-                    if base_file.exists():
-                        config_file = base_file
-                        break
-            
-            if not config_file or not config_file.exists():
-                warn(f"配置不存在: {config_name}，使用默認配置")
-                return {
-                    'task': {'name': '通用任務', 'language': '繁體中文'},
-                    'cli': {'tool': 'opencode', 'commands': {}},
-                    'opencode': {'max_tokens': 128000, 'token_threshold': 0.7},
-                    'execution': {'delay': 1, 'timeout': 300, 'max_retries': 5},
-                    'prompts': ['繼續工作']
-                }
+            for i in range(len(config_name.split('-')) - 1, 0, -1):
+                base_file = Path(f"tasks_yaml/{'-'.join(config_name.split('-')[:i])}.yaml")
+                if base_file.exists():
+                    config_file = base_file
+                    break
     
-    # 載入 YAML 文件
+    # 檢查文件是否存在
+    if not config_file.exists():
+        warn(f"配置不存在: {config_input}，使用默認配置")
+        return {
+            'task': {'name': '通用任務', 'language': '繁體中文'},
+            'cli': {'tool': 'opencode', 'commands': {}},
+            'opencode': {'max_tokens': 128000, 'token_threshold': 0.7},
+            'execution': {'delay': 1, 'timeout': 300, 'max_retries': 5},
+            'prompts': ['繼續工作']
+        }
+    
+    # 載入並解析 YAML
     with open(config_file) as f:
         data = yaml.safe_load(f)
     
-    # 提取配置
-    cfg = None
-    
-    # 檢查是否為嵌套配置
+    # 提取配置（支持嵌套和直接配置）
     if config_name in data:
         cfg = data[config_name]
         ok(f"已加載配置: {config_file.name} -> {config_name}")
     elif len(data) == 1 and isinstance(list(data.values())[0], dict):
-        # 單個嵌套配置
         key = list(data.keys())[0]
         cfg = data[key]
         ok(f"已加載配置: {config_file.name} -> {key}")
     else:
-        # 直接配置
         cfg = data
         ok(f"已加載配置: {config_file.name}")
     
-    # 顯示配置信息
-    cli_tool = cfg.get('cli', {}).get('tool', 'opencode')
-    print(f"  CLI 工具: {cli_tool}")
-    if 'task' in cfg and 'output_dir' in cfg['task']:
-        print(f"  輸出目錄: {cfg['task']['output_dir']}/\n")
+    # 不再顯示配置信息（已合併到啟動信息中）
     
     return cfg
 
@@ -236,82 +210,116 @@ def get_tokens(session_id, cli):
     except:
         return None
 
-# ==================== 命令執行 ====================
-
-def run_with_retry(session_id, prompt, timeout, max_retries, cli):
-    """執行 CLI 命令，支持重試機制"""
-    max_timeout = 3600  # 最大 1 小時
+def get_title(session_id, cli):
+    """獲取 session 標題（僅 OpenCode 支持）"""
+    if cli.tool != 'opencode':
+        return None
     
-    for retry in range(max_retries + 1):
-        current_timeout = min(timeout * (2 ** retry), max_timeout)
+    try:
+        result = subprocess.run(['opencode', 'session', 'list'], 
+                              capture_output=True, text=True, timeout=5)
+        for line in result.stdout.split('\n'):
+            if line.startswith(session_id):
+                parts = line.split(maxsplit=2)
+                return parts[1] if len(parts) > 1 else None
+    except:
+        pass
+    return None
+
+def export_context(session_id, cli):
+    """導出最後幾輪對話作為上下文（僅 OpenCode 支持）"""
+    if not cli.supports_export():
+        return ''
+    
+    try:
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as f:
+            tmp = f.name
+        subprocess.run(cli.export(session_id), stdout=open(tmp, 'w'),
+                      stderr=subprocess.DEVNULL, timeout=10)
+        with open(tmp) as f:
+            content = f.read()
+            data = json.loads(content[content.find('{'):])
+        Path(tmp).unlink()
         
-        if retry > 0:
-            warn(f"🔄 重試 #{retry}（超時設為 {current_timeout//60} 分鐘）")
+        # 提取最後 5 條文本消息
+        texts = []
+        for msg in data.get('messages', [])[-5:]:
+            for part in msg.get('parts', []) if isinstance(msg, dict) else []:
+                if isinstance(part, dict) and part.get('type') == 'text':
+                    text = part.get('text', '')[:500]  # 限制每條 500 字符
+                    if text:
+                        texts.append(text)
         
-        process = subprocess.Popen(cli.run_session(session_id, prompt), text=True)
-        start = time.time()
+        # 返回最後 3 條
+        return '\n'.join(texts[-3:]) if texts else ''
+    except:
+        return ''
+
+def create_session(old_id, task_name, context, cli):
+    """創建新 session（帶上下文，僅 OpenCode 支持）"""
+    if cli.tool != 'opencode':
+        return None
+    
+    try:
+        # 獲取當前所有 session
+        old_sessions = set(subprocess.run(['opencode', 'session', 'list'],
+                                        capture_output=True, text=True).stdout.split('\n'))
         
-        while True:
-            if process.poll() is not None:
-                return process.returncode == 0
-            
-            elapsed = time.time() - start
-            
-            if elapsed >= current_timeout:
-                process.terminate()
-                if retry < max_retries:
-                    warn(f"⏱️ 超時（{current_timeout//60} 分鐘），重試...")
-                    break
-                else:
-                    err(f"達到最大重試次數（{max_retries}），跳過")
-                    return False
-            
+        # 構建帶上下文的提示詞
+        if context:
+            prompt = f"繼續之前的{task_name}工作。\n\n上一輪最後的工作內容：\n{context}"
+        else:
+            prompt = f"繼續{task_name}工作"
+        
+        # 創建新 session
+        subprocess.Popen(['opencode', 'run', prompt], 
+                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        
+        # 等待新 session 出現（最多 30 秒）
+        for _ in range(30):
             time.sleep(1)
-    return False
+            new_sessions = set(subprocess.run(['opencode', 'session', 'list'],
+                                            capture_output=True, text=True).stdout.split('\n'))
+            diff = new_sessions - old_sessions
+            for line in diff:
+                if line.startswith('ses_'):
+                    return line.split()[0]
+        
+        return None
+    except:
+        return None
 
-# ==================== 主程序 ====================
+# ==================== 配置解析 ====================
 
-def main():
-    """主程序入口"""
-    if len(sys.argv) < 2:
-        print("用法: python3 opencode-infinity.py <session_id> [config]")
-        print("\n配置格式支持：")
-        print("  1. 配置名稱：medical-kb-codex")
-        print("  2. 文件名：medical-kb.yaml")
-        print("  3. 相對路徑：tasks_yaml/medical-kb.yaml")
-        print("  4. 絕對路徑：/home/user/config.yaml")
-        print("\n範例：")
-        print("  python3 opencode-infinity.py ses_api api-development-codex")
-        print("  python3 opencode-infinity.py ses_api medical-kb.yaml")
-        print("  python3 opencode-infinity.py ses_api tasks_yaml/testing.yaml")
-        sys.exit(1)
+def parse_config(cfg):
+    """解析配置並返回所有參數"""
+    def get_config(section, key, default=None):
+        """輔助函數：安全獲取配置值"""
+        return cfg.get(section, {}).get(key, default)
     
-    # 驗證 session_id
-    session_id = sys.argv[1]
-    if not re.match(r'^[a-zA-Z0-9_-]+$', session_id):
-        err(f"無效的 session ID: {session_id}")
-        sys.exit(1)
+    # 任務配置
+    task_name = get_config('task', 'name', '通用任務')
+    task_desc = get_config('task', 'description', '')
+    language = get_config('task', 'language', '繁體中文')
+    output_dir = get_config('task', 'output_dir', 'output')
     
-    config_name = sys.argv[2] if len(sys.argv) > 2 else 'medical-kb'
+    # OpenCode 設置
+    model = get_config('opencode', 'model', 'default')
+    max_tokens = get_config('opencode', 'max_tokens', 128000)
+    threshold = get_config('opencode', 'token_threshold', 0.7)
     
-    # 載入配置
-    print(f"使用配置: {config_name}")
-    cfg = load_config(config_name)
+    # 執行設置
+    delay = get_config('execution', 'delay', 1)
+    timeout = get_config('execution', 'timeout', 300)
+    max_retries = get_config('execution', 'max_retries', 5)
+    auto_continue = get_config('execution', 'auto_continue_on_error', True)
+    max_rounds = get_config('execution', 'max_rounds', 0)  # 0 = 無限制
     
-    # 初始化 CLI 適配器
-    cli_config = cfg.get('cli', {})
-    cli_tool = cli_config.get('tool', 'opencode')
-    cli_commands = cli_config.get('commands', {})
-    cli = CLIAdapter(cli_tool, cli_commands)
-    
-    # 讀取配置參數
-    task_name = cfg.get('task', {}).get('name', '通用任務')
-    language = cfg.get('task', {}).get('language', '繁體中文')
-    max_tokens = cfg.get('opencode', {}).get('max_tokens', 128000)
-    threshold = cfg.get('opencode', {}).get('token_threshold', 0.7)
-    delay = cfg.get('execution', {}).get('delay', 1)
-    timeout = cfg.get('execution', {}).get('timeout', 300)
-    max_retries = cfg.get('execution', {}).get('max_retries', 5)
+    # 顯示設置
+    display_cfg = cfg.get('display', {})
+    show_session_id = display_cfg.get('show_session_id', True)
+    show_token_usage = display_cfg.get('show_token_usage', True)
+    show_timestamp = display_cfg.get('show_timestamp', True)
     
     # 處理 prompts
     raw_prompts = cfg.get('prompts', ['繼續工作'])
@@ -327,83 +335,271 @@ def main():
     # 總結提示詞
     summary_prompt = cfg.get('summary_prompt', '總結本輪工作（300字內）')
     
-    # 切換策略
+    return {
+        'task_name': task_name, 'task_desc': task_desc, 
+        'language': language, 'output_dir': output_dir,
+        'model': model, 'max_tokens': max_tokens, 'threshold': threshold,
+        'delay': delay, 'timeout': timeout, 
+        'max_retries': max_retries, 'auto_continue': auto_continue,
+        'max_rounds': max_rounds,
+        'show_session_id': show_session_id, 
+        'show_token_usage': show_token_usage, 
+        'show_timestamp': show_timestamp,
+        'prompts': prompts, 'summary_prompt': summary_prompt
+    }
+
+# ==================== 命令執行 ====================
+
+def run_with_retry(session_id, prompt, timeout, max_retries, cli):
+    """執行 CLI 命令，支持重試機制"""
+    max_timeout = 3600  # 最大 1 小時
+    retry_delay = 3     # 重試間隔（秒）
+    
+    for retry in range(max_retries + 1):
+        current_timeout = min(timeout * (2 ** retry), max_timeout)
+        
+        if retry > 0:
+            warn(f"🔄 重試 #{retry}（超時設為 {current_timeout//60} 分鐘）")
+            # 重試前等待一段時間
+            print(f"   等待 {retry_delay} 秒後重試...")
+            time.sleep(retry_delay)
+        
+        process = subprocess.Popen(cli.run_session(session_id, prompt), text=True)
+        start = time.time()
+        
+        while True:
+            if process.poll() is not None:
+                # 進程已結束
+                if process.returncode == 0:
+                    return True
+                else:
+                    # 進程錯誤退出
+                    if retry < max_retries:
+                        warn(f"進程異常退出（返回碼: {process.returncode}），準備重試...")
+                        break
+                    else:
+                        err(f"達到最大重試次數（{max_retries}），跳過")
+                        return False
+            
+            elapsed = time.time() - start
+            
+            if elapsed >= current_timeout:
+                # 超時，終止進程
+                process.terminate()
+                try:
+                    process.wait(timeout=5)  # 等待進程優雅退出
+                except subprocess.TimeoutExpired:
+                    process.kill()  # 強制終止
+                
+                if retry < max_retries:
+                    warn(f"⏱️ 超時（{current_timeout//60} 分鐘），重試...")
+                    break
+                else:
+                    err(f"達到最大重試次數（{max_retries}），跳過")
+                    return False
+            
+            time.sleep(1)
+    return False
+
+# ==================== 主程序輔助函數 ====================
+
+def display_startup_info(config_name, cli_tool, params, switch_strategy):
+    """顯示啟動信息"""
+    print(f"使用配置: {config_name}")
+    print(f"{C.Y}💡 提示：運行中可隨時修改 YAML 配置，每輪自動熱更新{C.R}\n")
+    
+    sep()
+    log(f"OpenCode Infinity 啟動")
+    print(f"  CLI 工具: {cli_tool.upper()}")
+    print(f"  任務: {params['task_name']}")
+    if params['task_desc']:
+        print(f"  描述: {params['task_desc']}")
+    if params['model'] != 'default':
+        print(f"  模型: {params['model']}")
+    print(f"  切換策略: {switch_strategy.upper()}")
+    if params['max_rounds'] > 0:
+        print(f"  最大輪次: {params['max_rounds']} 輪")
+    print(f"  語言: {params['language']}")
+    print(f"  輸出目錄: {params['output_dir']}/")
+    sep()
+    print()
+
+def display_round_info(round_num, session_count, session_id, params, 
+                       switch_strategy, cli, should_switch_callback):
+    """顯示輪次信息並返回是否需要切換 Session"""
+    sep()
+    timestamp = datetime.now().strftime('%H:%M:%S') if params['show_timestamp'] else ''
+    log(f"第 {round_num} 輪 | Session #{session_count}" + 
+        (f" | {timestamp}" if timestamp else ""))
+    
+    should_switch = False
+    if switch_strategy == 'token':
+        tokens = get_tokens(session_id, cli)
+        if tokens and params['show_token_usage']:
+            pct = tokens / params['max_tokens'] * 100
+            color = C.G if pct < 50 else C.Y if pct < params['threshold'] * 100 else C.E
+            if params['show_session_id']:
+                print(f"  Session ID: {session_id}")
+            
+            # 顯示 Session 標題（如果有）
+            title = get_title(session_id, cli)
+            if title:
+                print(f"  標題: {title}")
+            
+            print(f"  {color}Token: {tokens:,}/{params['max_tokens']:,} ({pct:.1f}%){C.R}")
+            
+            if pct >= params['threshold'] * 100:
+                should_switch = True
+                warn(f"達到 Token 閾值 ({pct:.1f}%)，準備切換 Session")
+    else:
+        if params['show_session_id']:
+            print(f"  Session ID: {session_id}")
+    
+    print()
+    return should_switch
+
+def execute_summary_and_switch(session_id, session_count, params, cli):
+    """執行總結並生成新的 Session ID（帶上下文傳遞）"""
+    log("執行總結提示詞")
+    print()
+    
+    if run_with_retry(session_id, params['summary_prompt'], 
+                     params['timeout'], params['max_retries'], cli):
+        print()
+        ok("總結完成")
+        print()
+    else:
+        print()
+        warn("總結失敗，繼續切換")
+        print()
+    
+    # 導出上下文
+    log("導出上下文...")
+    context = export_context(session_id, cli)
+    if context:
+        ok(f"已導出上下文（{len(context)} 字符）")
+    else:
+        warn("無法導出上下文，將創建空白 Session")
+    print()
+    
+    # 嘗試使用上下文創建新 Session（僅 OpenCode 支持）
+    task_name = params.get('task_name', '通用任務')
+    new_session = create_session(session_id, task_name, context, cli)
+    
+    if new_session:
+        # 成功創建新 Session
+        session_count += 1
+        sep()
+        log(f"切換 Session: {session_id} → {new_session}")
+        ok("✓ 已創建新 Session（帶上下文）")
+        sep()
+        print()
+        return new_session, session_count
+    else:
+        # 回退到舊方法：手動生成 Session ID
+        warn("無法自動創建 Session，使用手動生成 ID")
+        old_session = session_id
+        session_count += 1
+        new_session = (f"{session_id.rsplit('_', 1)[0]}_{session_count}" 
+                       if '_' in session_id else f"{session_id}_{session_count}")
+        
+        sep()
+        log(f"切換 Session: {old_session} → {new_session}")
+        warn("⚠ 新 Session 無上下文，請手動創建")
+        sep()
+        print()
+        
+        return new_session, session_count
+
+# ==================== 主程序 ====================
+
+def main():
+    """主程序入口"""
+    if len(sys.argv) < 2:
+        print("用法: python3 opencode-infinity.py <session_id> [config]")
+        print("\n配置格式支持：")
+        print("  1. 配置名稱：opencode-example")
+        print("  2. 文件名：opencode-example.yaml")
+        print("  3. 相對路徑：tasks_yaml/opencode-example.yaml")
+        print("  4. 絕對路徑：/home/user/config.yaml")
+        print("\n範例：")
+        print("  python3 opencode-infinity.py ses_open opencode-example")
+        print("  python3 opencode-infinity.py ses_codex codex-example")
+        print("  python3 opencode-infinity.py ses_test tasks_yaml/opencode-example.yaml")
+        sys.exit(1)
+    
+    # 驗證 session_id
+    session_id = sys.argv[1]
+    if not re.match(r'^ses[a-zA-Z0-9_-]*$', session_id):
+        err(f"無效的 Session ID: {session_id}")
+        print(f"{C.Y}提示：Session ID 必須以 'ses' 開頭，例如：ses_test, ses_api{C.R}")
+        sys.exit(1)
+    
+    config_name = sys.argv[2] if len(sys.argv) > 2 else 'opencode-example'
+    
+    # 載入配置並初始化
+    cfg = load_config(config_name)
+    cli_config = cfg.get('cli', {})
+    cli_tool = cli_config.get('tool', 'opencode')
+    cli_commands = cli_config.get('commands', {})
+    cli = CLIAdapter(cli_tool, cli_commands)
+    params = parse_config(cfg)
+    
+    # 確定切換策略
     switch_strategy = cfg.get('execution', {}).get('switch_strategy', 'auto')
     if switch_strategy == 'auto':
         switch_strategy = 'token' if cli.supports_export() else 'rounds'
     
     # 顯示啟動信息
-    sep()
-    log(f"OpenCode Infinity 啟動")
-    print(f"CLI 工具: {cli_tool.upper()} | 任務: {task_name}")
-    print(f"切換策略: {switch_strategy.upper()} | 語言: {language}")
-    sep()
-    print()
+    display_startup_info(config_name, cli_tool, params, switch_strategy)
     
+    # 主循環
     round_num = 0
     start_time = datetime.now()
-    session_count = 1  # Session 計數器
+    session_count = 1
     
     try:
         while True:
             round_num += 1
             
+            # 檢查輪次限制
+            if params['max_rounds'] > 0 and round_num > params['max_rounds']:
+                print()
+                sep()
+                log(f"達到最大輪次限制（{params['max_rounds']} 輪），自動停止")
+                sep()
+                break
+            
+            # 熱更新配置
+            if round_num > 1:
+                try:
+                    cfg = load_config(config_name)
+                    params = parse_config(cfg)
+                    log(f"🔄 配置已熱更新")
+                except Exception as e:
+                    warn(f"配置熱更新失敗，使用舊配置: {e}")
+            
             # 顯示輪次信息
-            sep()
-            log(f"第 {round_num} 輪 | Session #{session_count} | {datetime.now().strftime('%H:%M:%S')}")
+            should_switch = display_round_info(
+                round_num, session_count, session_id, params, 
+                switch_strategy, cli, None
+            )
             
-            # Token 統計（僅 OpenCode）
-            should_switch = False
-            if switch_strategy == 'token':
-                tokens = get_tokens(session_id, cli)
-                if tokens:
-                    pct = tokens / max_tokens * 100
-                    color = C.G if pct < 50 else C.Y if pct < threshold * 100 else C.E
-                    print(f"Session ID: {session_id}")
-                    print(f"{color}Token: {tokens:,}/{max_tokens:,} ({pct:.1f}%){C.R}")
-                    
-                    if pct >= threshold * 100:
-                        should_switch = True
-                        warn(f"達到 Token 閾值 ({pct:.1f}%)，準備切換 Session")
-            else:
-                print(f"Session ID: {session_id}")
-            
-            sep()
-            print()
-            
-            # 如果需要切換 Session，先執行總結
+            # 處理 Session 切換
             if should_switch:
-                log("執行總結提示詞")
-                print()
-                
-                if run_with_retry(session_id, summary_prompt, timeout, max_retries, cli):
-                    print()
-                    ok("總結完成")
-                    print()
-                else:
-                    print()
-                    warn("總結失敗，繼續切換")
-                    print()
-                
-                # 生成新的 Session ID
-                old_session = session_id
-                session_count += 1
-                session_id = f"{session_id.rsplit('_', 1)[0]}_{session_count}" if '_' in session_id else f"{session_id}_{session_count}"
-                
-                sep()
-                log(f"切換 Session: {old_session} → {session_id}")
-                sep()
-                print()
-                
-                time.sleep(delay)
+                session_id, session_count = execute_summary_and_switch(
+                    session_id, session_count, params, cli
+                )
+                time.sleep(params['delay'])
                 continue
             
             # 執行提示詞
-            log(f"執行提示詞 #{(round_num - 1) % len(prompts) + 1}")
+            log(f"執行提示詞 #{(round_num - 1) % len(params['prompts']) + 1}")
             print()
             
-            prompt = prompts[(round_num - 1) % len(prompts)]
-            if run_with_retry(session_id, prompt, timeout, max_retries, cli):
+            prompt = params['prompts'][(round_num - 1) % len(params['prompts'])]
+            if run_with_retry(session_id, prompt, params['timeout'], 
+                            params['max_retries'], cli):
                 print()
                 ok("本輪完成")
                 print()
@@ -412,7 +608,7 @@ def main():
                 err("本輪失敗，繼續下一輪")
                 print()
             
-            time.sleep(delay)
+            time.sleep(params['delay'])
             
     except KeyboardInterrupt:
         # 顯示統計
@@ -422,7 +618,8 @@ def main():
         
         print(f"\n\n{'═'*70}")
         log("已停止")
-        print(f"共 {round_num} 輪 | {session_count} 個 Session | 用時 {hours}小時{minutes}分鐘")
+        print(f"共 {round_num} 輪 | {session_count} 個 Session | "
+              f"用時 {hours}小時{minutes}分鐘")
         sep()
         print()
 
