@@ -92,7 +92,7 @@ config-name:
   cli:
     tool: "codex"  # opencode, claude, codex, copilot
     commands:
-      run_session: "codex exec resume --last --skip-git-repo-check"
+      run_session: "codex exec resume --skip-git-repo-check"
   
   # OpenCode 設置
   opencode:
@@ -223,7 +223,7 @@ cli:
 cli:
   tool: "codex"
   commands:
-    run_session: "codex exec resume --last --skip-git-repo-check"
+    run_session: "codex exec resume --skip-git-repo-check"
 ```
 
 **注意：** `--skip-git-repo-check` 參數允許在任何目錄運行 Codex。
@@ -366,7 +366,7 @@ A: 確保配置中使用正確的 Codex 命令：
 cli:
   tool: "codex"
   commands:
-    run_session: "codex exec resume --last --skip-git-repo-check"
+    run_session: "codex exec resume --skip-git-repo-check"
 ```
 
 ### Q: 如何在運行中修改配置？

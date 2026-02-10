@@ -45,6 +45,7 @@ class CLIAdapter:
     def __init__(self, tool='opencode', custom_commands=None):
         self.tool = tool.lower()
         self.commands = self._get_default_commands()
+        self._codex_warned = False
         
         # 覆蓋自定義命令
         if custom_commands:
@@ -67,7 +68,7 @@ class CLIAdapter:
             },
             'codex': {
                 'run': ['codex', 'run', '--skip-git-repo-check'],
-                'run_session': ['codex', 'exec', 'resume', '--last', '--skip-git-repo-check'],
+                'run_session': ['codex', 'exec', 'resume', '--skip-git-repo-check'],
             },
             'copilot': {
                 'run': ['gh', 'copilot', 'explain'],
@@ -87,7 +88,7 @@ class CLIAdapter:
         執行帶會話的 CLI 命令
         
         特殊處理：
-        - Codex 的 "exec resume --last" 格式不插入 session_id
+        - Codex 支持「指定 Session」與「--last」兩種模式
         - 其他工具使用標準格式：command + session_id + prompt
         """
         cmd = self.get_cmd('run_session')
@@ -97,9 +98,11 @@ class CLIAdapter:
             warn("Prompt 為空，使用默認值")
             prompt = "繼續工作"
         
-        # Codex 特殊處理：exec resume --last 格式
-        cmd_str = ' '.join(cmd)
-        if self.tool == 'codex' and 'exec' in cmd_str and 'resume' in cmd_str:
+        # Codex 特殊處理：兼容舊的 --last 模式
+        if self.tool == 'codex' and '--last' in cmd:
+            if not self._codex_warned:
+                warn("Codex 的 run_session 命令包含 --last，將忽略自定義 Session ID。建議更新為 codex exec resume <session_id> ...")
+                self._codex_warned = True
             return cmd + [prompt]
         
         # 標準格式

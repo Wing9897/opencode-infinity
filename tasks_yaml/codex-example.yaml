@@ -18,7 +18,7 @@ codex-example:
   cli:
     tool: "codex"
     commands:
-      run_session: "codex exec resume --last --skip-git-repo-check"
+      run_session: "codex exec resume --skip-git-repo-check"
   
   # OpenCode 設置（Codex 不支持 Token 統計，這些設置不會生效）
   opencode:
@@ -65,5 +65,4 @@ codex-example:
     1. 完成了哪些功能
     2. 主要改進點
     3. 下一步建議
-
 
