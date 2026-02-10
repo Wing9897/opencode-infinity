@@ -533,9 +533,11 @@ def main():
     
     # 驗證 session_id
     session_id = sys.argv[1]
-    if not re.match(r'^ses[a-zA-Z0-9_-]*$', session_id):
+    uuid_regex = r'^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$'
+    ses_regex = r'^ses[a-zA-Z0-9_-]*$'
+    if not (re.match(ses_regex, session_id) or re.match(uuid_regex, session_id)):
         err(f"無效的 Session ID: {session_id}")
-        print(f"{C.Y}提示：Session ID 必須以 'ses' 開頭，例如：ses_test, ses_api{C.R}")
+        print(f"{C.Y}提示：Session ID 需為 'ses...' 或合法 UUID，例如：ses_task1 或 01234567-89ab-cdef-0123-456789abcdef{C.R}")
         sys.exit(1)
     
     config_name = sys.argv[2] if len(sys.argv) > 2 else 'opencode-example'
