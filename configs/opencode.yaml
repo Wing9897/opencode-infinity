@@ -1,0 +1,58 @@
+# ==========================================
+# OpenCode 通用配置
+# ==========================================
+# 使用: python -m opencode_infinity <session_id> opencode
+
+# 任務配置
+task:
+  name: "通用任務"
+  description: "OpenCode 自動執行 - 可根據需求修改提示詞"
+  language: "繁體中文"
+  output_dir: "output"
+
+# CLI 工具配置
+cli:
+  tool: "opencode"
+
+# 執行設置
+execution:
+  delay: 1                      # 每輪延遲（秒）
+  timeout: 300                  # 基礎超時（秒）
+  max_retries: 5                # 最大重試次數
+  auto_continue_on_error: true  # 錯誤時自動繼續
+  max_rounds: 0                 # 最大輪次（0 = 無限制）
+  switch_after_rounds: 0        # 幾輪後切換 session（0 = 不切換）
+  max_tokens: 128000            # 最大 token 限制（通用）
+  token_threshold: 0.7          # 達到 70% 時切換 session（OpenCode/Claude 支援）
+
+# 顯示設置
+display:
+  show_session_id: true         # 顯示 session ID
+  show_token_usage: true        # 顯示 token 使用量
+  show_timestamp: true          # 顯示時間戳
+
+# 提示詞（輪轉使用）
+prompts:
+  - |
+    生成實用工具函數：
+    - 字符串處理函數
+    - 日期格式化工具
+    - 數據驗證函數
+    - 包含完整的文檔和測試
+  - |
+    優化現有代碼：
+    - 改進代碼結構
+    - 添加錯誤處理
+    - 補充註釋說明
+  - |
+    完善項目文檔：
+    - 更新 README
+    - 添加使用範例
+    - 補充 API 說明
+
+# 總結提示詞（達到 token 閾值時使用）
+summary_prompt: |
+  請用繁體中文總結本輪工作（300字內）：
+  1. 完成了哪些功能
+  2. 主要改進點
+  3. 下一步建議
