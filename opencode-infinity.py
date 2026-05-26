@@ -506,7 +506,7 @@ TASK_SCHEMA: dict[str, FieldSchema] = {
 CLI_SCHEMA: dict[str, FieldSchema] = {
     "tool": FieldSchema(field_type=FieldType.STR, required=True, valid_values=("opencode", "claude", "codex", "copilot"), description="CLI tool to use"),
     "commands": FieldSchema(field_type=FieldType.DICT, required=False, description="Custom command overrides"),
-    "full_auto": FieldSchema(field_type=FieldType.BOOL, required=False, description="Enable full-auto mode (Codex)"),
+    "full_auto": FieldSchema(field_type=FieldType.BOOL, required=False, description="Legacy: maps to -a never -s danger-full-access (Codex 0.130+)"),
     "model": FieldSchema(field_type=FieldType.OPTIONAL_STR, required=False, description="Model name override"),
     "search": FieldSchema(field_type=FieldType.BOOL, required=False, description="Enable web search (Codex)"),
     "allowed_tools": FieldSchema(field_type=FieldType.OPTIONAL_STR, required=False, description="Allowed tools parameter (Claude)"),
@@ -1096,7 +1096,15 @@ _MAX_MODEL_NAME_LENGTH: int = 128
 
 
 class CodexAdapter(CLIAdapter):
-    """Adapter for the Codex CLI tool (v0.6x+)."""
+    """Adapter for the Codex CLI tool (v0.130+, Rust rewrite).
+
+    Since Codex CLI 0.130 the ``--full-auto`` flag no longer exists.
+    The ``exec`` subcommand is already non-interactive (approval: never).
+    Flags available differ between ``exec`` and ``exec resume``:
+      - exec: -m, -s, --skip-git-repo-check, -c, --dangerously-bypass-approvals-and-sandbox
+      - exec resume: -m, --skip-git-repo-check, -c, --dangerously-bypass-approvals-and-sandbox
+    Note: --search is NOT available on exec; use -c "search=true" instead.
+    """
 
     def __init__(self, config: CLIConfig) -> None:
         self._config = config
@@ -1112,44 +1120,49 @@ class CodexAdapter(CLIAdapter):
                 f"Model name exceeds maximum length of {_MAX_MODEL_NAME_LENGTH} characters (got {len(model)})."
             )
 
-    def _build_global_flags(self) -> list[str]:
+    def _build_exec_flags(self) -> list[str]:
+        """Build flags for ``codex exec [PROMPT]``."""
         flags: list[str] = []
         if self._config.full_auto:
-            flags.append("--full-auto")
+            # Legacy full_auto: bypass all safety
+            flags.append("--dangerously-bypass-approvals-and-sandbox")
+        else:
+            # Default: workspace-write sandbox (exec already defaults to approval: never)
+            flags.extend(["-s", "workspace-write"])
         if self._config.model is not None:
             flags.extend(["-m", self._config.model])
         if self._config.search:
-            flags.append("--search")
+            flags.extend(["-c", "search=true"])
+        flags.append("--skip-git-repo-check")
         return flags
 
-    def _build_subcommand_flags(self) -> list[str]:
-        return ["--skip-git-repo-check"]
+    def _build_resume_flags(self) -> list[str]:
+        """Build flags for ``codex exec resume``."""
+        flags: list[str] = []
+        if self._config.full_auto:
+            flags.append("--dangerously-bypass-approvals-and-sandbox")
+        if self._config.model is not None:
+            flags.extend(["-m", self._config.model])
+        flags.append("--skip-git-repo-check")
+        return flags
 
     def build_run_command(self, prompt: str) -> list[str]:
         if not prompt:
             raise CLIAdapterError("Prompt must not be empty")
-        cmd: list[str] = ["codex"]
-        cmd.extend(self._build_global_flags())
-        cmd.append("exec")
-        cmd.extend(self._build_subcommand_flags())
+        cmd: list[str] = ["codex", "exec"]
+        cmd.extend(self._build_exec_flags())
         return cmd
 
     def build_session_command(self, session_id: str, prompt: str) -> list[str]:
         if not prompt:
             raise CLIAdapterError("Prompt must not be empty")
-        cmd: list[str] = ["codex"]
-        cmd.extend(self._build_global_flags())
-        # Codex resume behavior is currently tied to the most recent session.
-        # Keep the explicit session_id parameter for interface consistency.
-        cmd.extend(["exec", "resume", "--last"])
-        cmd.extend(self._build_subcommand_flags())
+        cmd: list[str] = ["codex", "exec", "resume", "--last"]
+        cmd.extend(self._build_resume_flags())
         return cmd
 
     def build_continue_command(self) -> list[str]:
-        cmd: list[str] = ["codex"]
-        cmd.extend(self._build_global_flags())
-        cmd.extend(["resume", "--last"])
-        cmd.extend(self._build_subcommand_flags())
+        cmd: list[str] = ["codex", "exec", "resume", "--last"]
+        cmd.extend(self._build_resume_flags())
         return cmd
 
     def build_export_command(self, session_id: str) -> Optional[list[str]]:

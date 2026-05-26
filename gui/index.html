@@ -104,6 +104,7 @@ main { height: 100vh; display: flex; flex-direction: column; padding: 0.5rem 1re
     <div class="tab-nav">
         <a href="#" class="active" onclick="switchTab('console'); return false;">🖥 控制台</a>
         <a href="#" onclick="switchTab('editor'); return false;">📝 設定編輯器</a>
+        <a href="#" onclick="switchTab('aigen'); return false;">🤖 AI 生成</a>
     </div>
 
     <!-- Console Tab -->
@@ -150,8 +151,8 @@ main { height: 100vh; display: flex; flex-direction: column; padding: 0.5rem 1re
                                 <label>描述 <span class="help-icon">?<span class="tooltip">選填</span></span><input type="text" id="ed-task-desc" placeholder="選填"></label>
                             </div>
                             <div id="ed-codex-options" style="display:none;" class="checkbox-row">
-                                <label><input type="checkbox" id="ed-cli-fullauto" checked> Full Auto <span class="help-icon">?<span class="tooltip">Codex 全自動模式</span></span></label>
-                                <label><input type="checkbox" id="ed-cli-search" checked> Search <span class="help-icon">?<span class="tooltip">允許搜尋網路</span></span></label>
+                                <label><input type="checkbox" id="ed-cli-fullauto"> Full Auto <span class="help-icon">?<span class="tooltip">啟用後使用 --dangerously-bypass-approvals-and-sandbox（完全繞過安全限制，僅限隔離環境使用）</span></span></label>
+                                <label><input type="checkbox" id="ed-cli-search" checked> Search <span class="help-icon">?<span class="tooltip">允許搜尋網路（透過 -c search=true）</span></span></label>
                             </div>
                             <label>自訂指令 <span class="help-icon">?<span class="tooltip">覆蓋預設 CLI 指令，例如 codex exec resume --skip-git-repo-check</span></span><input type="text" id="ed-cli-command" placeholder="留空使用預設指令"></label>
                         </details>
@@ -199,6 +200,27 @@ main { height: 100vh; display: flex; flex-direction: column; padding: 0.5rem 1re
             </div>
         </div>
     </div>
+
+    <!-- AI Generate Tab -->
+    <div class="tab-content" id="tab-aigen" hidden>
+        <div style="display:flex; flex-direction:column; height:100%; gap:0.5rem;">
+            <div style="padding:0.5rem 0;">
+                <p style="margin:0 0 0.5rem 0; font-size:0.9rem; color:#64748b;">輸入你的任務簡述，然後複製下方的 Prompt 貼到任何 AI 工具中，它會幫你生成完整的 OpenCode Infinity 配置（任務名、描述、循環提示詞）。</p>
+                <label style="font-size:0.9rem; margin-bottom:0.3rem; display:block;">📋 你的任務簡述</label>
+                <textarea id="aigen-task-input" rows="3" placeholder="例如：幫我搜索並分析 2024 年最佳的 React UI 框架，比較功能、性能、社群活躍度，整理成表格" style="font-size:0.9rem; margin-bottom:0.5rem;"></textarea>
+                <div style="display:flex; gap:0.5rem; align-items:center;">
+                    <select id="aigen-lang" style="margin:0; padding:0.4rem 0.6rem; font-size:0.9rem; height:auto; max-width:140px;">
+                        <option value="繁體中文">繁體中文</option>
+                        <option value="English">English</option>
+                    </select>
+                    <button id="aigen-copy-btn" style="padding:0.45rem 1rem; font-size:0.9rem; white-space:nowrap;">📋 複製 AI Prompt</button>
+                    <span id="aigen-status" style="font-size:0.85rem; color:#10b981;"></span>
+                </div>
+            </div>
+            <label style="font-size:0.85rem; color:#64748b;">⬇ 預覽（複製後貼到 ChatGPT / Claude / Gemini 等任何 AI）</label>
+            <pre id="aigen-preview" style="flex:1; overflow-y:auto; font-family:'Cascadia Code','Fira Code',monospace; font-size:12px; line-height:1.5; white-space:pre-wrap; word-break:break-all; background:#f8fafc; border:1px solid #e2e8f0; border-radius:6px; padding:0.6rem; margin:0;"></pre>
+        </div>
+    </div>
 </main>
 
 <script>
@@ -206,10 +228,13 @@ main { height: 100vh; display: flex; flex-direction: column; padding: 0.5rem 1re
 function switchTab(tab) {
     document.getElementById('tab-console').hidden = (tab !== 'console');
     document.getElementById('tab-editor').hidden = (tab !== 'editor');
+    document.getElementById('tab-aigen').hidden = (tab !== 'aigen');
     document.querySelectorAll('.tab-nav a').forEach(el => el.classList.remove('active'));
     const links = document.querySelectorAll('.tab-nav a');
     if (tab === 'console') links[0].classList.add('active');
-    else links[1].classList.add('active');
+    else if (tab === 'editor') links[1].classList.add('active');
+    else links[2].classList.add('active');
+    if (tab === 'aigen') aigenUpdatePreview();
 }
 
 // ===== Console Tab Logic =====
@@ -474,6 +499,83 @@ function editorSetStatus(msg, isError) {
 document.getElementById('ed-add-prompt-btn').addEventListener('click', () => editorAddPrompt(''));
 document.getElementById('editor-save-btn').addEventListener('click', editorSave);
 document.getElementById('editor-reset-btn').addEventListener('click', editorReset);
+
+// ===== AI Generate Tab Logic =====
+function aigenBuildPrompt() {
+    const taskInput = document.getElementById('aigen-task-input').value.trim();
+    const lang = document.getElementById('aigen-lang').value;
+    const userTask = taskInput || '（用戶未輸入任務描述）';
+
+    return `你是一個 AI 自動化任務配置生成器。我正在使用一個叫 "OpenCode Infinity" 的工具，它能讓 AI 編碼工具（Codex、Claude、OpenCode、Copilot）7x24 無人值守自動循環執行任務。
+
+我需要你根據我的任務簡述，生成以下三個欄位的內容：
+
+## 輸出格式（請嚴格按照此 YAML 格式輸出）
+
+\`\`\`yaml
+task:
+  name: "簡短的任務名稱（10字內）"
+  description: "詳細的任務描述（說明目標、範圍、預期產出）"
+
+prompts:
+  - "第一個循環提示詞（指示 AI 開始工作的方向）"
+  - "第二個循環提示詞（指示 AI 繼續或深入）"
+  - "第三個循環提示詞（指示 AI 檢查、驗證或整理）"
+
+summary_prompt: "總結提示詞（要求 AI 在切換 session 前總結工作）"
+\`\`\`
+
+## 規則
+
+1. **name**: 簡潔有力，一眼看出任務主題
+2. **description**: 包含具體目標、涵蓋範圍、預期輸出格式
+3. **prompts**: 生成 3-5 個循環提示詞，它們會被輪流使用：
+   - 第一個：啟動/繼續主要工作
+   - 中間的：深入分析、擴展搜索、補充細節
+   - 最後一個：檢查品質、驗證數據、整理輸出
+4. **summary_prompt**: 要求 AI 用 300 字內總結本輪完成的工作
+5. 所有內容使用「${lang}」撰寫
+6. 提示詞要具體且有方向性，避免太籠統的「繼續工作」
+
+## 我的任務簡述
+
+${userTask}
+
+---
+
+請直接輸出 YAML 格式的結果，不需要額外解釋。`;
+}
+
+function aigenUpdatePreview() {
+    const preview = document.getElementById('aigen-preview');
+    preview.textContent = aigenBuildPrompt();
+}
+
+function aigenCopy() {
+    const text = aigenBuildPrompt();
+    navigator.clipboard.writeText(text).then(() => {
+        const status = document.getElementById('aigen-status');
+        status.textContent = '✅ 已複製到剪貼簿！';
+        setTimeout(() => { status.textContent = ''; }, 3000);
+    }).catch(() => {
+        // Fallback for older browsers
+        const ta = document.createElement('textarea');
+        ta.value = text;
+        ta.style.position = 'fixed';
+        ta.style.opacity = '0';
+        document.body.appendChild(ta);
+        ta.select();
+        document.execCommand('copy');
+        document.body.removeChild(ta);
+        const status = document.getElementById('aigen-status');
+        status.textContent = '✅ 已複製到剪貼簿！';
+        setTimeout(() => { status.textContent = ''; }, 3000);
+    });
+}
+
+document.getElementById('aigen-copy-btn').addEventListener('click', aigenCopy);
+document.getElementById('aigen-task-input').addEventListener('input', aigenUpdatePreview);
+document.getElementById('aigen-lang').addEventListener('change', aigenUpdatePreview);
 
 // Init
 connectSSE();

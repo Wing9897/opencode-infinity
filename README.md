@@ -73,9 +73,10 @@ summary_prompt: "總結本輪工作（300字內）"
 |------|----------|--------|-------|---------|
 | Token 統計 | ✅ | ✅ | ❌ | ⚠️ 有限 |
 | Session 切換 | ✅ | ✅ | ✅ | ✅ |
-| Full Auto | — | — | ✅ | — |
+| Sandbox 控制 | — | — | ✅ | — |
 | Web Search | — | — | ✅ | — |
 
+> Codex CLI 0.130+ 已移除 `--full-auto`，改用 `-s workspace-write`（預設）或 `--dangerously-bypass-approvals-and-sandbox`。
 > Codex/Copilot 不支援 Token 統計時，自動改用輪次策略（`switch_after_rounds`）。
 
 ## 功能
