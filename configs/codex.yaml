@@ -5,7 +5,9 @@ task:
   description: 系統性搜索並整理全球可用的ETF與基金產品，涵蓋高至低風險等級，深入分析每個產品的費用結構（TER/MER）、股息率、歷史回報（1年/3年/5年/10年）及風險指標（標準差、Sharpe比率、最大回撤）。最終依「核心全球股票
     + 高股息 + REIT」三大框架，將所有分析整合至同一份 .md 文件，並以多維度評價表格呈現，輸出結構化、可直接使用的投資參考報告。
 cli:
-  tool: opencode
+  tool: codex
+  model: gpt-5.4-mini
+  search: true
 execution:
   delay: 1
   timeout: 300
