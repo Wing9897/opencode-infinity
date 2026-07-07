@@ -7,6 +7,12 @@ on:
       - "README.md"
       - "docs/**"
   workflow_dispatch:
+    inputs:
+      release_tag:
+        description: "Existing tag to release (e.g. v1.0.0). Only used for manual runs."
+        required: false
+        default: "v1.0.0"
+        type: string
 
 concurrency:
   group: release-${{ github.ref }}
@@ -75,6 +81,7 @@ jobs:
 
       - name: Bump version and push tag
         id: tag_version
+        if: github.event_name == 'push'
         uses: mathieudutour/github-tag-action@v6.2
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
@@ -83,8 +90,8 @@ jobs:
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ steps.tag_version.outputs.new_tag }}
-          name: Release ${{ steps.tag_version.outputs.new_tag }}
+          tag_name: ${{ github.event_name == 'workflow_dispatch' && inputs.release_tag || steps.tag_version.outputs.new_tag }}
+          name: Release ${{ github.event_name == 'workflow_dispatch' && inputs.release_tag || steps.tag_version.outputs.new_tag }}
           generate_release_notes: true
           files: dist/*.exe
           fail_on_unmatched_files: true
