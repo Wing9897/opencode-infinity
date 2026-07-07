@@ -80,6 +80,17 @@ jobs:
           path: dist/*.exe
           if-no-files-found: error
 
+      - name: Detect existing version tags
+        id: version_state
+        if: github.event_name == 'push'
+        shell: bash
+        run: |
+          if git tag -l 'v*' | grep -q .; then
+            echo "has_tags=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "has_tags=false" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Bump version and push tag
         id: tag_version
         if: github.event_name == 'push'
@@ -87,6 +98,7 @@ jobs:
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
           default_bump: patch
+          custom_tag: ${{ steps.version_state.outputs.has_tags == 'false' && '1.0.0' || '' }}
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
