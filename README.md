@@ -1,5 +1,7 @@
 # OpenCode Infinity ⚡
 
+**語言：** [中文](README.md) · [English](README.en.md)
+
 讓 AI 編碼工具（Codex、Claude、OpenCode、Copilot）7x24 無人值守自動循環執行。
 
 設好 prompt，它就自動幫你不斷叫 AI 做事 — 處理重試、超時、session 管理，你去睡覺它繼續跑。
@@ -165,6 +167,7 @@ opencode-infinity/
 │   ├── ci.yml              ← PR / push 時跑測試
 │   └── build-desktop.yml   ← push main 時 build + release
 ├── README.md
+├── README.en.md
 └── .gitignore
 ```
 
