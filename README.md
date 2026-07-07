@@ -37,21 +37,15 @@ python opencode_infinity.py --gui --no-browser --port 9000
 ```
 
 開啟瀏覽器 `http://127.0.0.1:8080`，提供：
-- 控制台 — 選 config、啟動/停止、即時日誌、統計
-- 設定編輯器 — 表單式建立/編輯 YAML
+- 控制台 — 選 config、啟動/停止、工作目錄、即時日誌、統計
+- 設定檔 — 點「建立範本」後，**手動編輯 YAML**（不在網頁內建編輯器）
 - 介面語言 — 右上角可切換中文 / English
 
-### 桌面 GUI 模式（pywebview）
+### 桌面 exe（Release）
 
-```bash
-python opencode_infinity.py --desktop
-# 或
-python desktop/launcher.py
-```
+Windows 使用者下載 `OpenCode-Infinity-GUI.exe` 即可（內嵌視窗，無需 Python）。
 
-桌面版預設使用 port **19090**（避免 8080 衝突）。啟動失敗時會彈出錯誤視窗，日誌在 `%APPDATA%\OpenCodeInfinity\desktop.log`。
-
-### Windows 桌面 exe（Release）
+源碼開發請用 `--gui`（瀏覽器），不必裝 pywebview。
 
 每次 **push 到 `main`**，GitHub Actions 會自動：
 
@@ -98,8 +92,6 @@ task:
 cli:
   tool: "codex"           # opencode / claude / codex / copilot
   model: ""               # 留空用預設，或指定如 openai/gpt-5.2-codex
-  commands:
-    run_session: ""       # 自訂 CLI 指令（留空用預設）
 
 execution:
   delay: 1                # 每輪延遲（秒）
@@ -109,10 +101,10 @@ execution:
   switch_after_rounds: 0  # 跑多少輪切換 session（0 = 不切換）
   max_tokens: 128000      # Token 上限（用於判斷何時切換 session）
   token_threshold: 0.7    # 達到 70% 時切換（OpenCode/Claude 支援）
+  working_dir: ""         # CLI 工作目錄（留空 = 啟動時 cwd；GUI 可覆寫）
 
 display:
   show_session_id: true
-  show_token_usage: true
   show_timestamp: true
 
 prompts:
@@ -143,27 +135,26 @@ summary_prompt: "總結本輪工作（300字內）"
 - 熱重載：運行中修改 YAML，下一輪自動套用
 - 輸入消毒：防止命令注入
 - 即時輸出：Codex 的思考過程直接顯示在終端
-- Web GUI：瀏覽器操作 + 設定編輯器（表單式建立/編輯 config）
+- Web GUI：啟動/停止、日誌監看（設定請編輯 YAML）
 - 成功/失敗統計：Ctrl+C 時顯示
 
 ## 注意事項
 
-⚠️ **不要在本工具目錄中執行** — 請 `cd` 到目標專案目錄再跑，否則 AI 會修改本工具的程式碼。
+⚠️ **不要在本工具目錄中執行** — 請 `cd` 到目標專案目錄再跑，否則 AI 會修改本工具的程式碼。源碼版 GUI 可在「進階選項」設定 **工作目錄**，或於 YAML 設定 `execution.working_dir`。
 
 ## 專案結構
 
 ```
 opencode-infinity/
-├── opencode_infinity.py    ← 主程式（CLI / --gui / --desktop）
+├── opencode_infinity.py    ← 主程式（CLI / --gui）
 ├── desktop/
-│   ├── launcher.py         ← 桌面版入口（exe build 用）
+│   ├── launcher.py         ← exe 入口（內嵌視窗）
 │   └── opencode_infinity.spec
 ├── gui/
-│   ├── index.html          ← Web GUI 頁面
-│   ├── styles.css          ← GUI 樣式
-│   ├── app.js              ← GUI 邏輯
-│   ├── i18n.js             ← 介面多語言（中文 / English）
-│   └── pico.min.css        ← 離線樣式框架
+│   ├── index.html          ← Web GUI（控制台）
+│   ├── styles.css
+│   ├── app.js
+│   └── i18n.js
 ├── configs/
 │   └── test-opencode.yaml  ← 本機 OpenCode 實測用（內建範本由程式碼提供，經 GUI 建立）
 ├── tests/

@@ -18,7 +18,6 @@ execution:
 
 display:
   show_session_id: true
-  show_token_usage: true
   show_timestamp: true
 
 prompts:

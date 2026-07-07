@@ -68,6 +68,14 @@ def normalize_newlines(text: str) -> str:
     return text.replace("\r\n", "\n").replace("\r", "\n")
 
 
+_ANSI_ESCAPE_RE: re.Pattern[str] = re.compile(r"\x1b\[[0-9;]*m")
+
+
+def _strip_ansi(text: str) -> str:
+    """Remove terminal ANSI color/control sequences from CLI output."""
+    return _ANSI_ESCAPE_RE.sub("", text)
+
+
 def _configure_stdio_encoding() -> None:
     """Best-effort UTF-8 stdio on Windows consoles and PyInstaller builds."""
     if sys.platform != "win32":
@@ -209,7 +217,6 @@ class TaskConfig:
 class CLIConfig:
     """CLI tool configuration."""
     tool: str = "opencode"
-    commands: dict[str, Any] = field(default_factory=dict)
     full_auto: bool = False
     model: Optional[str] = None
     search: bool = False
@@ -230,13 +237,13 @@ class ExecutionConfig:
     switch_strategy: str = "auto"  # auto, token, rounds
     max_tokens: int = 128000
     token_threshold: float = 0.7
+    working_dir: str = ""  # empty = inherit parent process cwd for CLI subprocesses
 
 
 @dataclass(frozen=True)
 class DisplayConfig:
     """Display settings configuration."""
     show_session_id: bool = True
-    show_token_usage: bool = True
     show_timestamp: bool = True
 
 
@@ -494,7 +501,6 @@ TASK_DEFAULTS: dict[str, Any] = {
 
 CLI_DEFAULTS: dict[str, Any] = {
     "tool": "opencode",
-    "commands": {},
     "full_auto": False,
     "model": None,
     "search": False,
@@ -513,11 +519,11 @@ EXECUTION_DEFAULTS: dict[str, Any] = {
     "switch_strategy": "auto",
     "max_tokens": 128000,
     "token_threshold": 0.7,
+    "working_dir": "",
 }
 
 DISPLAY_DEFAULTS: dict[str, Any] = {
     "show_session_id": True,
-    "show_token_usage": True,
     "show_timestamp": True,
 }
 
@@ -557,18 +563,12 @@ TASK_SCHEMA: dict[str, FieldSchema] = {
 
 CLI_SCHEMA: dict[str, FieldSchema] = {
     "tool": FieldSchema(field_type=FieldType.STR, required=True, valid_values=("opencode", "claude", "codex", "copilot")),
-    "commands": FieldSchema(field_type=FieldType.DICT, required=False),
     "full_auto": FieldSchema(field_type=FieldType.BOOL, required=False),
     "model": FieldSchema(field_type=FieldType.OPTIONAL_STR, required=False),
     "search": FieldSchema(field_type=FieldType.BOOL, required=False),
     "allowed_tools": FieldSchema(field_type=FieldType.OPTIONAL_STR, required=False),
     "permission_mode": FieldSchema(field_type=FieldType.OPTIONAL_STR, required=False),
     "mcp_server": FieldSchema(field_type=FieldType.OPTIONAL_STR, required=False),
-}
-
-OPENCODE_LEGACY_SCHEMA: dict[str, FieldSchema] = {
-    "max_tokens": FieldSchema(field_type=FieldType.INT, required=False, min_value=1),
-    "token_threshold": FieldSchema(field_type=FieldType.FLOAT, required=False, min_value=0.0, max_value=1.0),
 }
 
 EXECUTION_SCHEMA: dict[str, FieldSchema] = {
@@ -581,11 +581,11 @@ EXECUTION_SCHEMA: dict[str, FieldSchema] = {
     "switch_strategy": FieldSchema(field_type=FieldType.STR, required=False, valid_values=("auto", "token", "rounds")),
     "max_tokens": FieldSchema(field_type=FieldType.INT, required=False, min_value=1),
     "token_threshold": FieldSchema(field_type=FieldType.FLOAT, required=False, min_value=0.0, max_value=1.0),
+    "working_dir": FieldSchema(field_type=FieldType.STR, required=False),
 }
 
 DISPLAY_SCHEMA: dict[str, FieldSchema] = {
     "show_session_id": FieldSchema(field_type=FieldType.BOOL, required=False),
-    "show_token_usage": FieldSchema(field_type=FieldType.BOOL, required=False),
     "show_timestamp": FieldSchema(field_type=FieldType.BOOL, required=False),
 }
 
@@ -595,7 +595,6 @@ SUMMARY_PROMPT_SCHEMA: FieldSchema = FieldSchema(field_type=FieldType.STR, requi
 SECTION_SCHEMAS: dict[str, dict[str, FieldSchema]] = {
     "task": TASK_SCHEMA,
     "cli": CLI_SCHEMA,
-    "opencode": OPENCODE_LEGACY_SCHEMA,
     "execution": EXECUTION_SCHEMA,
     "display": DISPLAY_SCHEMA,
 }
@@ -860,20 +859,6 @@ class ConfigLoader:
         except OSError as exc:
             raise ConfigError(f"Cannot read config file '{self._config_path}': {exc}") from exc
         raw = _load_yaml_mapping_from_text(content, source=str(self._config_path))
-        return self._unwrap_named_config(raw)
-
-    def _unwrap_named_config(self, raw: dict[str, Any]) -> dict[str, Any]:
-        if len(raw) != 1:
-            return raw
-        key = next(iter(raw))
-        value = raw[key]
-        if key in ALL_KNOWN_SECTIONS:
-            return raw
-        if isinstance(value, dict):
-            inner_keys = set(value.keys())
-            known_keys = inner_keys & ALL_KNOWN_SECTIONS
-            if known_keys:
-                return value
         return raw
 
     def _validate_section(
@@ -931,16 +916,9 @@ class ConfigLoader:
         return errors
 
     def _build_config(self, raw: dict[str, Any]) -> AppConfig:
-        cli_raw = self._apply_legacy_opencode_settings(raw.get("cli", {}), raw.get("opencode", {}))
-        if isinstance(cli_raw, dict):
-            cli_raw = dict(cli_raw)
-            cli_raw["commands"] = self._normalize_cli_commands(cli_raw.get("commands", {}))
-
         task = self._build_task_config(raw.get("task", {}))
-        cli = self._build_cli_config(cli_raw)
-        execution = self._build_execution_config(
-            self._merge_token_settings(raw.get("execution", {}), raw.get("opencode", {}))
-        )
+        cli = self._build_cli_config(raw.get("cli", {}))
+        execution = self._build_execution_config(raw.get("execution", {}))
         display = self._build_display_config(raw.get("display", {}))
         prompts = self._normalize_prompts(raw.get("prompts"))
         summary_prompt = self._normalize_summary_prompt(raw.get("summary_prompt"))
@@ -949,21 +927,6 @@ class ConfigLoader:
             task=task, cli=cli, execution=execution,
             display=display, prompts=prompts, summary_prompt=summary_prompt,
         )
-
-    def _normalize_cli_commands(self, raw_commands: Any) -> dict[str, Any]:
-        """Normalize CLI command overrides and migrate legacy string commands."""
-        if not isinstance(raw_commands, dict):
-            return dict(CLI_DEFAULTS["commands"])
-
-        commands = dict(raw_commands)
-        run_session = commands.get("run_session")
-        if isinstance(run_session, str):
-            migrated = run_session.split()
-            self._warn(
-                f"Migration: cli.commands.run_session converted from string '{run_session}' to list {migrated}"
-            )
-            commands["run_session"] = migrated
-        return commands
 
     def _normalize_prompts(self, raw_prompts: Any) -> list[str]:
         if not isinstance(raw_prompts, list):
@@ -994,11 +957,8 @@ class ConfigLoader:
             return CLIConfig()
         tool = raw.get("tool", CLI_DEFAULTS["tool"])
         normalized_tool = tool.strip().lower() if isinstance(tool, str) else CLI_DEFAULTS["tool"]
-        commands_raw = raw.get("commands", CLI_DEFAULTS["commands"])
-        commands = commands_raw if isinstance(commands_raw, dict) else dict(CLI_DEFAULTS["commands"])
         return CLIConfig(
             tool=normalized_tool,
-            commands=commands,
             full_auto=raw.get("full_auto", CLI_DEFAULTS["full_auto"]),
             model=raw.get("model", CLI_DEFAULTS["model"]),
             search=raw.get("search", CLI_DEFAULTS["search"]),
@@ -1006,23 +966,6 @@ class ConfigLoader:
             permission_mode=raw.get("permission_mode", CLI_DEFAULTS["permission_mode"]),
             mcp_server=raw.get("mcp_server", CLI_DEFAULTS["mcp_server"]),
         )
-
-    def _apply_legacy_opencode_settings(self, cli_raw: Any, opencode_raw: Any) -> dict[str, Any]:
-        """Apply legacy opencode.* values onto cli/execution inputs."""
-        merged: dict[str, Any] = dict(cli_raw) if isinstance(cli_raw, dict) else {}
-        if isinstance(opencode_raw, dict) and not merged.get("model") and opencode_raw.get("model"):
-            merged["model"] = opencode_raw["model"]
-        return merged
-
-    def _merge_token_settings(self, execution_raw: Any, opencode_raw: Any) -> dict[str, Any]:
-        """Prefer execution.* token fields; fall back to legacy opencode.* values."""
-        merged: dict[str, Any] = dict(execution_raw) if isinstance(execution_raw, dict) else {}
-        if not isinstance(opencode_raw, dict):
-            return merged
-        for key in ("max_tokens", "token_threshold"):
-            if key not in merged and key in opencode_raw:
-                merged[key] = opencode_raw[key]
-        return merged
 
     def _build_execution_config(self, raw: Any) -> ExecutionConfig:
         if not isinstance(raw, dict):
@@ -1040,6 +983,14 @@ class ConfigLoader:
             raw=raw, field_name="token_threshold",
             default=EXECUTION_DEFAULTS["token_threshold"], warning_prefix="execution.token_threshold",
         )
+        working_dir = raw.get("working_dir", EXECUTION_DEFAULTS["working_dir"])
+        if working_dir is None:
+            working_dir = ""
+        elif not isinstance(working_dir, str):
+            self._warn("execution.working_dir must be a string, using empty value")
+            working_dir = ""
+        else:
+            working_dir = working_dir.strip()
         return ExecutionConfig(
             delay=delay, timeout=timeout, max_retries=max_retries,
             auto_continue_on_error=raw.get("auto_continue_on_error", EXECUTION_DEFAULTS["auto_continue_on_error"]),
@@ -1048,6 +999,7 @@ class ConfigLoader:
             switch_strategy=raw.get("switch_strategy", EXECUTION_DEFAULTS["switch_strategy"]),
             max_tokens=max_tokens,
             token_threshold=token_threshold,
+            working_dir=working_dir,
         )
 
     def _build_display_config(self, raw: Any) -> DisplayConfig:
@@ -1055,7 +1007,6 @@ class ConfigLoader:
             return DisplayConfig()
         return DisplayConfig(
             show_session_id=raw.get("show_session_id", DISPLAY_DEFAULTS["show_session_id"]),
-            show_token_usage=raw.get("show_token_usage", DISPLAY_DEFAULTS["show_token_usage"]),
             show_timestamp=raw.get("show_timestamp", DISPLAY_DEFAULTS["show_timestamp"]),
         )
 
@@ -1432,8 +1383,19 @@ _MAX_BACKOFF_SECONDS: int = 3600
 class Executor:
     """Executes subprocess commands with retry, timeout, and cleanup."""
 
-    def __init__(self, sanitizer: Optional[InputSanitizer] = None) -> None:
+    def __init__(
+        self,
+        sanitizer: Optional[InputSanitizer] = None,
+        *,
+        working_dir: Optional[Path] = None,
+    ) -> None:
         self._sanitizer = sanitizer if sanitizer is not None else InputSanitizer()
+        self._working_dir = working_dir
+
+    def _subprocess_cwd(self) -> Optional[str]:
+        if self._working_dir is None:
+            return None
+        return str(self._working_dir)
 
     def run_with_retry(
         self,
@@ -1442,6 +1404,7 @@ class Executor:
         max_retries: int,
         prompt: Optional[str] = None,
         stdin_input: Optional[str] = None,
+        on_output_line: Optional[Callable[[str], None]] = None,
     ) -> ExecutionResult:
         """Execute a command with retry logic and exponential backoff."""
         start_time = time.monotonic()
@@ -1465,10 +1428,24 @@ class Executor:
                 attempt_timeout = self._calculate_backoff_timeout(timeout, attempt)
 
                 try:
-                    result = self._execute_once(
-                        command=resolved_command, timeout=attempt_timeout,
-                        stdin_input=stdin_bytes, temp_files=temp_files,
-                    )
+                    if on_output_line is not None:
+                        return_code, last_stdout, last_stderr = self._execute_once_streaming(
+                            resolved_command,
+                            attempt_timeout,
+                            stdin_input=stdin_bytes,
+                            on_output_line=on_output_line,
+                        )
+                        result = subprocess.CompletedProcess(
+                            args=resolved_command,
+                            returncode=return_code,
+                            stdout=last_stdout.encode("utf-8", errors="replace"),
+                            stderr=last_stderr.encode("utf-8", errors="replace"),
+                        )
+                    else:
+                        result = self._execute_once(
+                            command=resolved_command, timeout=attempt_timeout,
+                            stdin_input=stdin_bytes, temp_files=temp_files,
+                        )
                     last_stdout = self._decode_output(result.stdout)
                     last_stderr = self._decode_output(result.stderr)
                     if result.returncode == 0:
@@ -1545,11 +1522,13 @@ class Executor:
         stdin_input: Optional[str] = None,
         prompt: Optional[str] = None,
         capture_output: bool = False,
+        on_output_line: Optional[Callable[[str], None]] = None,
     ) -> ExecutionResult:
         """Execute a command using Popen for stdin pipe support.
         
         When capture_output=False (default), stdout/stderr are inherited from
         the terminal so the user sees real-time output from the subprocess.
+        When on_output_line is set, output is streamed to the callback instead.
         When capture_output=True, output is captured into ExecutionResult fields.
         """
         start_time = time.monotonic()
@@ -1565,6 +1544,34 @@ class Executor:
         stdin_bytes = stdin_input.encode("utf-8") if stdin_input else None
 
         try:
+            if on_output_line is not None:
+                try:
+                    return_code, stdout_text, stderr_text = self._execute_once_streaming(
+                        self._resolve_command(command),
+                        timeout,
+                        stdin_input=stdin_bytes,
+                        on_output_line=on_output_line,
+                    )
+                except subprocess.TimeoutExpired:
+                    duration = time.monotonic() - start_time
+                    return ExecutionResult(
+                        success=False, return_code=-1, duration_seconds=duration, retry_count=0,
+                        errors=[RetryError(attempt=1, timestamp=utc_now_iso(), exception_type="TimeoutExpired", message=f"Command timed out after {timeout}s")],
+                    )
+                duration = time.monotonic() - start_time
+                return ExecutionResult(
+                    success=return_code == 0,
+                    return_code=return_code,
+                    duration_seconds=duration,
+                    retry_count=0,
+                    errors=(
+                        [] if return_code == 0
+                        else [RetryError(attempt=1, timestamp=utc_now_iso(), return_code=return_code, message=f"Command exited with code {return_code}")]
+                    ),
+                    stdout_text=stdout_text,
+                    stderr_text=stderr_text,
+                )
+
             process: Optional[subprocess.Popen[bytes]] = None
             try:
                 resolved_command = self._resolve_command(command)
@@ -1574,6 +1581,7 @@ class Executor:
                     stdout=subprocess.PIPE if capture_output else None,
                     stderr=subprocess.PIPE if capture_output else None,
                     shell=False,
+                    cwd=self._subprocess_cwd(),
                     creationflags=get_creation_flags(),
                 )
                 if capture_output:
@@ -1658,8 +1666,73 @@ class Executor:
     def _execute_once(self, command: list[str], timeout: int, stdin_input: Optional[bytes] = None, temp_files: Optional[list[Path]] = None) -> subprocess.CompletedProcess[bytes]:
         return subprocess.run(
             command, input=stdin_input, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-            shell=False, timeout=timeout, creationflags=get_creation_flags(),
+            shell=False, timeout=timeout, cwd=self._subprocess_cwd(),
+            creationflags=get_creation_flags(),
         )
+
+    def _execute_once_streaming(
+        self,
+        command: list[str],
+        timeout: int,
+        *,
+        stdin_input: Optional[bytes] = None,
+        on_output_line: Callable[[str], None],
+    ) -> tuple[int, str, str]:
+        """Run a command and stream stdout/stderr lines to a callback."""
+        process = subprocess.Popen(
+            command,
+            stdin=subprocess.PIPE if stdin_input else None,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            shell=False,
+            cwd=self._subprocess_cwd(),
+            creationflags=get_creation_flags(),
+        )
+        stdout_chunks: list[str] = []
+        stderr_chunks: list[str] = []
+
+        def _reader(pipe: Any, chunks: list[str], prefix: str = "") -> None:
+            try:
+                while True:
+                    line = pipe.readline()
+                    if not line:
+                        break
+                    text = self._decode_output(line) if isinstance(line, (bytes, bytearray)) else str(line)
+                    chunks.append(text)
+                    stripped = text.rstrip("\r\n")
+                    if stripped:
+                        on_output_line(prefix + stripped)
+            finally:
+                pipe.close()
+
+        readers: list[threading.Thread] = []
+        if process.stdout is not None:
+            thread = threading.Thread(
+                target=_reader, args=(process.stdout, stdout_chunks), daemon=True
+            )
+            thread.start()
+            readers.append(thread)
+        if process.stderr is not None:
+            thread = threading.Thread(
+                target=_reader, args=(process.stderr, stderr_chunks, "[stderr] "), daemon=True
+            )
+            thread.start()
+            readers.append(thread)
+
+        if stdin_input and process.stdin is not None:
+            process.stdin.write(stdin_input)
+            process.stdin.close()
+
+        try:
+            process.wait(timeout=timeout)
+        except subprocess.TimeoutExpired:
+            terminate_process(process)
+            raise
+
+        for thread in readers:
+            thread.join(timeout=1.0)
+
+        return process.returncode if process.returncode is not None else -1, "".join(stdout_chunks), "".join(stderr_chunks)
 
     @staticmethod
     def _decode_output(output: Optional[bytes]) -> str:
@@ -1920,6 +1993,44 @@ def _app_root() -> Path:
     return Path(__file__).parent
 
 
+def _normalize_working_dir_text(value: Any) -> str:
+    if value is None or not isinstance(value, str):
+        return ""
+    return value.strip()
+
+
+def _resolve_execution_working_dir(
+    config: AppConfig,
+    *,
+    override: Optional[str] = None,
+) -> Optional[Path]:
+    """Resolve subprocess cwd from GUI override or YAML execution.working_dir."""
+    raw = _normalize_working_dir_text(override)
+    if not raw:
+        raw = _normalize_working_dir_text(config.execution.working_dir)
+    if not raw:
+        return None
+    path = Path(raw).expanduser()
+    if not path.is_absolute():
+        path = Path.cwd() / path
+    path = path.resolve()
+    if not path.is_dir():
+        raise ConfigError(f"working_dir is not a directory: {path}")
+    return path
+
+
+def _self_tool_directory_warning(path: Path) -> Optional[str]:
+    """Warn when automation may modify this tool's own source tree."""
+    if getattr(sys, "frozen", False):
+        return None
+    if (path / "opencode_infinity.py").is_file():
+        return (
+            f"工作目錄含 opencode_infinity.py（{path}），"
+            "AI 可能修改本工具源碼。請改用目標專案目錄。"
+        )
+    return None
+
+
 def _get_user_config_dir() -> Path:
     """Return the cross-platform user config directory."""
     if sys.platform == "win32":
@@ -1951,10 +2062,10 @@ execution:
   switch_after_rounds: 0
   max_tokens: 128000
   token_threshold: 0.7
+  # working_dir: "D:/my-project"  # 留空則沿用啟動目錄
 
 display:
   show_session_id: true
-  show_token_usage: true
   show_timestamp: true
 
 prompts:
@@ -2001,10 +2112,10 @@ execution:
   switch_after_rounds: 0
   max_tokens: 128000
   token_threshold: 0.7
+  # working_dir: "D:/my-project"  # 留空則沿用啟動目錄
 
 display:
   show_session_id: true
-  show_token_usage: true
   show_timestamp: true
 
 prompts:
@@ -2234,6 +2345,7 @@ def _execute_prompt_round(
     prompt: str,
     timeout: int,
     max_retries: int,
+    on_output_line: Optional[Callable[[str], None]] = None,
 ) -> ExecutionResult:
     """Execute one prompt round using the adapter's preferred transport."""
     command = _build_round_command(adapter, round_num, session_id, prompt)
@@ -2243,12 +2355,14 @@ def _execute_prompt_round(
             timeout=timeout,
             stdin_input=prompt,
             prompt=prompt,
+            on_output_line=on_output_line,
         )
     return executor.run_with_retry(
         command=command,
         timeout=timeout,
         max_retries=max_retries,
         prompt=prompt,
+        on_output_line=on_output_line,
     )
 
 
@@ -2366,6 +2480,7 @@ class _ExecutionLoopHooks:
     on_reloaded: Optional[Callable[[str], None]] = None
     on_reload_failed: Optional[Callable[[str], None]] = None
     on_command_preview: Optional[Callable[[list[str]], None]] = None
+    on_cli_output: Optional[Callable[[str], None]] = None
     on_iteration_end: Optional[Callable[[_ExecutionLoopStats], None]] = None
     on_session_switch_attempt: Optional[Callable[[], None]] = None
     on_abort: Optional[Callable[[str], None]] = None
@@ -2438,6 +2553,7 @@ def _run_execution_loop(
             prompt=current_prompt,
             timeout=active_config.execution.timeout,
             max_retries=active_config.execution.max_retries,
+            on_output_line=hooks.on_cli_output,
         )
 
         if result.success:
@@ -2523,24 +2639,13 @@ def _parse_launch_options(argv: list[str]) -> tuple[list[str], _LaunchOptions]:
 def main() -> None:
     """Main entry point for OpenCode Infinity.
 
-    CLI interface: python opencode_infinity.py <session_id> [config_name]
-    GUI interface: python opencode_infinity.py --gui
-    Desktop GUI: python opencode_infinity.py --desktop
+    CLI: python opencode_infinity.py <session_id> [config_name]
+    GUI: python opencode_infinity.py --gui
     """
     _configure_stdio_encoding()
     global _main_logger
     _main_logger = setup_logger("opencode_infinity.__main__")
     raw_args = sys.argv[1:]
-    if "--desktop" in raw_args:
-        desktop_args = [arg for arg in raw_args if arg != "--desktop"]
-        positional, options = _parse_launch_options(desktop_args)
-        if positional:
-            _show_fatal_error("OpenCode Infinity", f"Unexpected arguments for --desktop: {' '.join(positional)}")
-            sys.exit(1)
-        init_config_dir(options.config_dir)
-        desktop_port = options.port if options.port_explicit else DEFAULT_DESKTOP_PORT
-        _start_desktop(port=desktop_port)
-        return
 
     if "--gui" in raw_args:
         gui_args = [arg for arg in raw_args if arg != "--gui"]
@@ -2589,14 +2694,12 @@ def _run(args: Optional[list[str]] = None) -> None:
         print("\nOptions:", file=sys.stderr)
         print("  --config-dir PATH   Override config directory", file=sys.stderr)
         print("  --gui               Start browser-based web GUI", file=sys.stderr)
-        print("  --desktop           Start pywebview desktop GUI", file=sys.stderr)
         print("  --port PORT         GUI server port (default: 8080)", file=sys.stderr)
         print("  --no-browser        Do not auto-open browser in --gui mode", file=sys.stderr)
         print("\nExamples:", file=sys.stderr)
         print("  python opencode_infinity.py ses_docs codex     # 使用 codex.yaml", file=sys.stderr)
         print("  python opencode_infinity.py ses_abc123 codex   # 指定 session", file=sys.stderr)
         print("  python opencode_infinity.py --gui", file=sys.stderr)
-        print("  python opencode_infinity.py --desktop", file=sys.stderr)
         sys.exit(1)
 
     try:
@@ -2638,7 +2741,21 @@ def _run(args: Optional[list[str]] = None) -> None:
         app_logger.error("_run: adapter creation failed: %s", exc)
         sys.exit(1)
 
-    executor = Executor()
+    try:
+        working_dir = _resolve_execution_working_dir(config)
+    except ConfigError as exc:
+        print(f"ERROR: {exc}", file=sys.stderr)
+        app_logger.error("_run: invalid working_dir: %s", exc)
+        sys.exit(1)
+
+    tool_warning = _self_tool_directory_warning(working_dir) if working_dir else None
+    if tool_warning:
+        print(f"WARNING: {tool_warning}", file=sys.stderr)
+        app_logger.warning(tool_warning)
+    if working_dir:
+        app_logger.info("CLI working directory: %s", working_dir)
+
+    executor = Executor(working_dir=working_dir)
     session_manager = SessionManager(adapter, executor, config)
 
     _state.current_session_id = session_id
@@ -2722,6 +2839,7 @@ _gui_state: dict[str, Any] = {
     "start_time": 0.0,
     "config_name": "",
     "session_id": "",
+    "working_dir": "",
     "thread": None,
     "stop_event": None,
 }
@@ -2742,7 +2860,12 @@ def _gui_log(message: str) -> None:
     print(formatted, file=sys.stderr)
 
 
-def _gui_run_task(config_name: str, session_id: str, stop_event: threading.Event) -> None:
+def _gui_run_task(
+    config_name: str,
+    session_id: str,
+    stop_event: threading.Event,
+    working_dir_override: Optional[str] = None,
+) -> None:
     """Background thread: run the execution loop with GUI logging."""
     _gui_log(f"🚀 啟動執行 - Config: {config_name}, Session: {session_id}")
     with _gui_state_lock:
@@ -2762,12 +2885,28 @@ def _gui_run_task(config_name: str, session_id: str, stop_event: threading.Event
         _gui_log(f"✅ 設定載入成功: tool={config.cli.tool}")
 
         try:
+            working_dir = _resolve_execution_working_dir(
+                config, override=working_dir_override
+            )
+        except ConfigError as exc:
+            _gui_log(f"❌ 工作目錄無效: {exc}")
+            return
+
+        tool_warning = _self_tool_directory_warning(working_dir) if working_dir else None
+        if tool_warning:
+            _gui_log(f"⚠️ {tool_warning}")
+        if working_dir:
+            _gui_log(f"📁 工作目錄: {working_dir}")
+        else:
+            _gui_log(f"📁 工作目錄: {Path.cwd()}（沿用啟動目錄）")
+
+        try:
             adapter = create_adapter(config.cli.tool, config.cli)
         except (ValueError, CLIAdapterError) as exc:
             _gui_log(f"❌ CLI 適配器建立失敗: {exc}")
             return
 
-        executor = Executor()
+        executor = Executor(working_dir=working_dir)
         session_manager = SessionManager(adapter, executor, config)
         loop_logger = logging.getLogger("opencode_infinity.gui_loop")
 
@@ -2780,10 +2919,22 @@ def _gui_run_task(config_name: str, session_id: str, stop_event: threading.Event
         def _on_gui_round_begin(
             round_num: int, active_session_id: str, active_config: AppConfig, current_prompt: str
         ) -> None:
+            with _gui_state_lock:
+                _gui_state["round_count"] = round_num
+                _gui_state["session_id"] = active_session_id
             _gui_log(
                 f"▶ Round {round_num} | Session: {active_session_id} | "
                 f"Prompt: {truncate_text(current_prompt, 60)}"
             )
+
+        def _on_gui_cli_output(line: str) -> None:
+            clean = _strip_ansi(line)
+            if clean.startswith("[stderr] "):
+                clean = clean[9:]
+            clean = clean.strip()
+            if not clean:
+                return
+            _gui_log(f"  | {truncate_text(clean, 1200)}")
 
         hooks = _ExecutionLoopHooks(
             should_stop=stop_event.is_set,
@@ -2802,6 +2953,7 @@ def _gui_run_task(config_name: str, session_id: str, stop_event: threading.Event
             on_reloaded=lambda summary: _gui_log(f"🔄 設定已熱重載: {summary}"),
             on_reload_failed=_gui_log,
             on_command_preview=lambda command: _gui_log(f"  執行命令: {' '.join(command[:3])}..."),
+            on_cli_output=_on_gui_cli_output,
             on_iteration_end=_sync_gui_state,
             interruptible_delay=True,
         )
@@ -2882,55 +3034,15 @@ def _register_config_api_routes(app: Any, jsonify: Any, request: Any) -> None:
         if not target.is_file():
             return jsonify({"ok": False, "error": "檔案不存在"}), 404
         try:
-            content = target.read_text(encoding="utf-8")
-            return jsonify({"content": content})
+            working_dir = ""
+            try:
+                config = ConfigLoader(target).load()
+                working_dir = config.execution.working_dir
+            except (ConfigError, OSError, ValueError):
+                pass
+            return jsonify({"working_dir": working_dir})
         except OSError as exc:
             return jsonify({"ok": False, "error": f"讀取失敗: {exc}"}), 500
-
-    @app.route("/api/config/save", methods=["POST"])
-    def api_config_save():
-        data = request.get_json(force=True, silent=True) or {}
-        filename = data.get("filename", "").strip()
-        content = data.get("content", "")
-        try:
-            target = _config_file_path(filename)
-        except ConfigError as exc:
-            return jsonify({"ok": False, "error": str(exc)}), 400
-        try:
-            _load_yaml_mapping_from_text(content, source=f"GUI save payload: {filename}")
-        except ConfigError as exc:
-            return jsonify({"ok": False, "error": f"YAML 格式無效: {exc}"}), 400
-        configs_dir = get_tasks_config_dir()
-        configs_dir.mkdir(parents=True, exist_ok=True)
-        try:
-            target.write_text(content, encoding="utf-8")
-        except OSError as exc:
-            return jsonify({"ok": False, "error": f"寫入失敗: {exc}"}), 500
-        return jsonify({"ok": True, "path": str(target)})
-
-    @app.route("/api/config/generate-yaml", methods=["POST"])
-    def api_config_generate_yaml():
-        data = request.get_json(force=True, silent=True) or {}
-        try:
-            yaml_str = yaml.dump(data, default_flow_style=False, allow_unicode=True, sort_keys=False)
-            return jsonify({"yaml": yaml_str})
-        except (TypeError, ValueError, yaml.YAMLError) as exc:
-            return jsonify({"yaml": None, "error": str(exc)}), 500
-
-    @app.route("/api/config/parse-yaml", methods=["POST"])
-    def api_config_parse_yaml():
-        data = request.get_json(force=True, silent=True) or {}
-        content = data.get("content", "")
-        try:
-            parsed = _load_yaml_mapping_from_text(content, source="GUI parse payload")
-            keys = list(parsed.keys())
-            if len(keys) == 1 and isinstance(parsed[keys[0]], dict):
-                inner = parsed[keys[0]]
-                if any(k in inner for k in ("task", "cli", "execution", "prompts")):
-                    parsed = inner
-            return jsonify({"config": parsed})
-        except ConfigError as exc:
-            return jsonify({"error": f"YAML 解析失敗: {exc}"}), 400
 
 
 def _register_runtime_api_routes(app: Any, jsonify: Any, request: Any, Response: Any) -> None:
@@ -2942,6 +3054,7 @@ def _register_runtime_api_routes(app: Any, jsonify: Any, request: Any, Response:
         data = request.get_json(force=True, silent=True) or {}
         config_name = data.get("config", "")
         session_id = data.get("session_id", "").strip()
+        working_dir_override = _normalize_working_dir_text(data.get("working_dir"))
         if not config_name:
             return jsonify({"ok": False, "error": "未指定設定檔"}), 400
         if session_id and not _validate_session_id(session_id):
@@ -2952,6 +3065,13 @@ def _register_runtime_api_routes(app: Any, jsonify: Any, request: Any, Response:
             return jsonify({"ok": False, "error": str(exc)}), 400
         if not config_path.is_file():
             return jsonify({"ok": False, "error": f"找不到設定檔: {config_name}"}), 404
+        try:
+            config = ConfigLoader(config_path).load()
+            resolved_working_dir = _resolve_execution_working_dir(
+                config, override=working_dir_override or None
+            )
+        except (ConfigError, OSError, ValueError) as exc:
+            return jsonify({"ok": False, "error": str(exc)}), 400
         if not session_id:
             session_id = f"ses_{int(time.time())}"
 
@@ -2962,13 +3082,15 @@ def _register_runtime_api_routes(app: Any, jsonify: Any, request: Any, Response:
             _gui_state["running"] = True
             _gui_state["config_name"] = config_name
             _gui_state["session_id"] = session_id
+            _gui_state["working_dir"] = str(resolved_working_dir) if resolved_working_dir else ""
             _gui_state["round_count"] = 0
             _gui_state["session_count"] = 1
+            _gui_state["start_time"] = time.monotonic()
             _gui_state["stop_event"] = stop_event
 
         t = threading.Thread(
             target=_gui_run_task,
-            args=(config_name, session_id, stop_event),
+            args=(config_name, session_id, stop_event, working_dir_override or None),
             daemon=True,
         )
         with _gui_state_lock:
@@ -3000,6 +3122,7 @@ def _register_runtime_api_routes(app: Any, jsonify: Any, request: Any, Response:
                 "session_count": _gui_state["session_count"],
                 "config_name": _gui_state["config_name"],
                 "session_id": _gui_state["session_id"],
+                "working_dir": _gui_state.get("working_dir", ""),
             }
         minutes = int(elapsed_seconds) // 60
         seconds = int(elapsed_seconds) % 60
@@ -3075,9 +3198,18 @@ def _start_gui(*, port: int = 8080, open_browser: bool = True) -> None:
         print(f"ERROR: {exc}", file=sys.stderr)
         sys.exit(1)
 
+    preferred_port = port
+    try:
+        port = _pick_listen_port(port)
+    except ConfigError as exc:
+        print(f"ERROR: {exc}", file=sys.stderr)
+        sys.exit(1)
+
     config_dir = get_tasks_config_dir()
     _eprint("🌐 OpenCode Infinity Web GUI 啟動中...")
     _eprint(f"   http://127.0.0.1:{port}")
+    if port != preferred_port:
+        _eprint(f"   (Port {preferred_port} unavailable, using {port} instead)")
     _eprint(f"   Config dir: {config_dir}")
 
     if open_browser:

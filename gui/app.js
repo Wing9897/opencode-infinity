@@ -1,6 +1,5 @@
-// ===== Utilities =====
-const STORAGE_KEY_TAB = 'oci_active_tab';
 const STORAGE_KEY_CONFIG = 'oci_last_config';
+const STORAGE_KEY_WORKING_DIR = 'oci_working_dir';
 
 function showToast(message, type) {
     const root = document.getElementById('toast-root');
@@ -59,13 +58,6 @@ function fillConfigSelect(selectEl, configs, emptyKey) {
 }
 
 function refreshDynamicI18n() {
-    document.querySelectorAll('.prompt-item').forEach((item) => {
-        const id = item.id.replace('ed-prompt-', '');
-        const label = item.querySelector('.prompt-label');
-        const textarea = item.querySelector('textarea');
-        if (label) label.textContent = t('promptLabel', { n: id });
-        if (textarea) textarea.placeholder = t('placeholderPrompt');
-    });
     document.querySelectorAll('button[data-i18n]').forEach((btn) => {
         if (!btn.classList.contains('is-loading')) {
             delete btn.dataset.originalText;
@@ -79,29 +71,13 @@ function refreshDynamicI18n() {
     updateAppStatusBadge();
 }
 
-// ===== Tab switching =====
-let editorDirty = false;
-let editorSuppressDirty = false;
-
-function switchTab(tab, force) {
-    if (!force && tab === 'console' && editorDirty) {
-        if (!confirm(t('confirmLeaveEditor'))) return;
-    }
-    document.getElementById('tab-console').hidden = (tab !== 'console');
-    document.getElementById('tab-editor').hidden = (tab !== 'editor');
-    document.querySelectorAll('.tab-nav a').forEach(el => {
-        el.classList.toggle('active', el.dataset.tab === tab);
-    });
-    localStorage.setItem(STORAGE_KEY_TAB, tab);
-}
-
-// ===== Console Tab Logic =====
 const logPanel = document.getElementById('log-panel');
 const logEmpty = document.getElementById('log-empty');
 const startBtn = document.getElementById('start-btn');
 const stopBtn = document.getElementById('stop-btn');
 const configSelect = document.getElementById('config-select');
 const sessionInput = document.getElementById('session-id');
+const workingDirInput = document.getElementById('working-dir');
 const copySessionBtn = document.getElementById('copy-session-btn');
 const statusRun = document.getElementById('status-run');
 const statusConn = document.getElementById('status-conn');
@@ -134,9 +110,22 @@ function updateAppStatusBadge() {
 function syncConfigSelection(name) {
     if (!name) return;
     if (configSelect.querySelector('option[value="' + name + '"]')) configSelect.value = name;
-    const edSelect = document.getElementById('editor-load-select');
-    if (edSelect.querySelector('option[value="' + name + '"]')) edSelect.value = name;
     localStorage.setItem(STORAGE_KEY_CONFIG, name);
+    prefillWorkingDirFromConfig(name);
+}
+
+function prefillWorkingDirFromConfig(name) {
+    if (!name || !workingDirInput) return;
+    const saved = localStorage.getItem(STORAGE_KEY_WORKING_DIR);
+    if (saved) {
+        workingDirInput.value = saved;
+        return;
+    }
+    apiFetch('/api/config/' + encodeURIComponent(name))
+        .then((data) => {
+            if (data.working_dir) workingDirInput.value = data.working_dir;
+        })
+        .catch(() => {});
 }
 
 function loadConfigList(selectName) {
@@ -145,14 +134,6 @@ function loadConfigList(selectName) {
         .then((data) => {
             const configs = data.configs || [];
             fillConfigSelect(configSelect, configs, 'noConfigs');
-            const edSelect = document.getElementById('editor-load-select');
-            edSelect.innerHTML = '<option value="">' + t('selectConfig') + '</option>';
-            configs.forEach((c) => {
-                const opt = document.createElement('option');
-                opt.value = c;
-                opt.textContent = c;
-                edSelect.appendChild(opt);
-            });
             if (configs.length > 0) {
                 const pick = preferred && configs.includes(preferred) ? preferred : configs[0];
                 syncConfigSelection(pick);
@@ -211,6 +192,9 @@ function addLog(msg) {
     if (msg.includes('\u2705') || msg.includes('完成') || msg.includes('complete')) cls = ' log-success';
     else if (msg.includes('\u274c') || msg.includes('失敗') || msg.includes('failed')) cls = ' log-error';
     else if (msg.includes('\u26a0') || msg.includes('WARNING')) cls = ' log-warning';
+    else if (msg.includes('  | +')) cls = ' log-diff-add';
+    else if (msg.includes('  | -')) cls = ' log-diff-del';
+    else if (msg.includes('  | ')) cls = ' log-cli';
     div.className = cls;
     div.textContent = msg;
     logPanel.appendChild(div);
@@ -243,7 +227,32 @@ function scheduleStatusPoll() {
     if (statusInterval) clearInterval(statusInterval);
     if (document.hidden) return;
     const ms = appRunning ? STATUS_POLL_ACTIVE_MS : STATUS_POLL_IDLE_MS;
+    updateStatus();
     statusInterval = setInterval(updateStatus, ms);
+}
+
+let elapsedTicker = null;
+let elapsedStartMs = 0;
+
+function formatElapsedSeconds(totalSeconds) {
+    const minutes = Math.floor(totalSeconds / 60);
+    const seconds = totalSeconds % 60;
+    return minutes + ':' + String(seconds).padStart(2, '0');
+}
+
+function startElapsedTicker() {
+    elapsedStartMs = Date.now();
+    if (elapsedTicker) clearInterval(elapsedTicker);
+    elapsedTicker = setInterval(() => {
+        if (!appRunning) return;
+        const seconds = Math.floor((Date.now() - elapsedStartMs) / 1000);
+        document.getElementById('stat-elapsed').textContent = formatElapsedSeconds(seconds);
+    }, 1000);
+}
+
+function stopElapsedTicker() {
+    if (elapsedTicker) clearInterval(elapsedTicker);
+    elapsedTicker = null;
 }
 
 function updateStatus() {
@@ -257,16 +266,20 @@ function updateStatus() {
         if (data.session_id) sessionInput.value = data.session_id;
         updateAppStatusBadge();
 
-        document.querySelectorAll('.stat-card').forEach((card) => card.classList.remove('is-active'));
         if (data.running) {
             startBtn.disabled = true;
             stopBtn.disabled = false;
-            document.getElementById('stat-rounds').closest('.stat-card')?.classList.add('is-active');
+            document.getElementById('stat-card-rounds')?.classList.add('is-active');
         } else {
             stopBtn.disabled = true;
+            document.getElementById('stat-card-rounds')?.classList.remove('is-active');
             updateStartButtonState();
         }
-        if (wasRunning !== appRunning) scheduleStatusPoll();
+        if (wasRunning !== appRunning) {
+            scheduleStatusPoll();
+            if (appRunning) startElapsedTicker();
+            else stopElapsedTicker();
+        }
     }).catch(() => {
         appConnected = false;
         updateAppStatusBadge();
@@ -280,11 +293,14 @@ startBtn.addEventListener('click', () => {
         return;
     }
     const sid = sessionInput.value.trim();
+    const workingDir = workingDirInput ? workingDirInput.value.trim() : '';
+    if (workingDir) localStorage.setItem(STORAGE_KEY_WORKING_DIR, workingDir);
+    else localStorage.removeItem(STORAGE_KEY_WORKING_DIR);
     setButtonLoading(startBtn, true, t('starting'));
     apiFetch('/api/start', {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({config: config, session_id: sid})
+        body: JSON.stringify({config: config, session_id: sid, working_dir: workingDir})
     })
     .then((data) => {
         setButtonLoading(startBtn, false);
@@ -295,6 +311,7 @@ startBtn.addEventListener('click', () => {
         startBtn.disabled = true;
         stopBtn.disabled = false;
         appRunning = true;
+        startElapsedTicker();
         scheduleStatusPoll();
         updateAppStatusBadge();
         showToast(t('toastTaskStarted'), 'success');
@@ -358,353 +375,16 @@ copySessionBtn.addEventListener('click', () => {
 
 sessionInput.addEventListener('input', updateAppStatusBadge);
 
-// ===== Editor Tab Logic =====
-let edPromptCounter = 0;
-const editorDirtyBadge = document.getElementById('editor-dirty-badge');
-const editorStatusBar = document.getElementById('editor-status');
-const editorStatusText = document.getElementById('editor-status-text');
-
-function markEditorDirty() {
-    if (editorSuppressDirty) return;
-    editorDirty = true;
-    editorDirtyBadge.hidden = false;
-}
-
-function clearEditorDirty() {
-    editorDirty = false;
-    editorDirtyBadge.hidden = true;
-}
-
-function editorUpdateCli() {
-    const tool = document.getElementById('ed-cli-tool').value;
-    document.getElementById('ed-codex-options').hidden = (tool !== 'codex');
-}
-
-function editorAddPrompt(content) {
-    edPromptCounter++;
-    const container = document.getElementById('ed-prompts-container');
-    const div = document.createElement('div');
-    div.className = 'prompt-item';
-    div.id = 'ed-prompt-' + edPromptCounter;
-    div.innerHTML = '<div class="prompt-label">' + t('promptLabel', { n: edPromptCounter }) + '</div>' +
-        '<textarea class="ed-prompt-textarea" placeholder="' + t('placeholderPrompt') + '">' + (content || '') + '</textarea>' +
-        '<button type="button" class="prompt-remove" onclick="editorRemovePrompt(' + edPromptCounter + ')">\u00d7</button>';
-    container.appendChild(div);
-    div.querySelector('textarea').addEventListener('input', markEditorDirty);
-}
-
-function editorRemovePrompt(id) {
-    const el = document.getElementById('ed-prompt-' + id);
-    if (!el) return;
-    const container = document.getElementById('ed-prompts-container');
-    if (container.children.length <= 1) {
-        showToast(t('toastNeedPrompt'), 'error');
-        return;
-    }
-    el.remove();
-    markEditorDirty();
-}
-
-function editorGetPrompts() {
-    const areas = document.querySelectorAll('.ed-prompt-textarea');
-    const prompts = [];
-    areas.forEach(ta => { const v = ta.value.trim(); if (v) prompts.push(v); });
-    return prompts.length > 0 ? prompts : [t('defaultPrompt')];
-}
-
-function editorValidate() {
-    const taskName = document.getElementById('ed-task-name');
-    let hasPrompt = false;
-    document.querySelectorAll('.ed-prompt-textarea').forEach(ta => {
-        if (ta.value.trim()) hasPrompt = true;
-    });
-    let valid = true;
-    taskName.classList.remove('field-invalid');
-    if (!taskName.value.trim()) {
-        taskName.classList.add('field-invalid');
-        valid = false;
-    }
-    if (!hasPrompt) valid = false;
-    if (!valid) showToast(t('toastRequiredFields'), 'error');
-    return valid;
-}
-
-function editorGenerateConfig() {
-    const config = {};
-    const taskName = document.getElementById('ed-task-name').value.trim();
-    const taskDesc = document.getElementById('ed-task-desc').value.trim();
-    const taskLang = document.getElementById('ed-task-lang').value;
-    const taskOutput = document.getElementById('ed-task-output').value.trim() || 'output';
-    config.task = { name: taskName || t('defaultTaskName'), language: taskLang, output_dir: taskOutput };
-    if (taskDesc) config.task.description = taskDesc;
-    const cliTool = document.getElementById('ed-cli-tool').value;
-    config.cli = { tool: cliTool };
-    const cliModel = document.getElementById('ed-cli-model').value.trim();
-    if (cliModel) config.cli.model = cliModel;
-    const cliCommand = document.getElementById('ed-cli-command').value.trim();
-    if (cliCommand) config.cli.commands = { run_session: cliCommand };
-    if (cliTool === 'codex') {
-        config.cli.full_auto = document.getElementById('ed-cli-fullauto').checked;
-        config.cli.search = document.getElementById('ed-cli-search').checked;
-    }
-    config.execution = {
-        delay: parseInt(document.getElementById('ed-exec-delay').value) || 1,
-        timeout: parseInt(document.getElementById('ed-exec-timeout').value) || 300,
-        max_retries: parseInt(document.getElementById('ed-exec-retries').value) || 5,
-        max_rounds: parseInt(document.getElementById('ed-exec-rounds').value) || 0,
-        switch_after_rounds: parseInt(document.getElementById('ed-exec-switch-rounds').value) || 0,
-        max_tokens: parseInt(document.getElementById('ed-max-tokens').value) || 128000,
-        token_threshold: parseFloat(document.getElementById('ed-token-threshold').value) || 0.7,
-        auto_continue_on_error: document.getElementById('ed-exec-continue').checked
-    };
-    config.display = {
-        show_session_id: document.getElementById('ed-disp-session').checked,
-        show_token_usage: document.getElementById('ed-disp-token').checked,
-        show_timestamp: document.getElementById('ed-disp-time').checked
-    };
-    config.prompts = editorGetPrompts();
-    config.summary_prompt = document.getElementById('ed-summary-prompt').value.trim() || t('defaultSummary');
-    return config;
-}
-
-function editorSave() {
-    if (!editorValidate()) return;
-    let filename = document.getElementById('editor-filename').value.trim();
-    if (!filename) {
-        filename = prompt(t('promptFilename'));
-        if (!filename) return;
-    }
-    if (!filename.endsWith('.yaml') && !filename.endsWith('.yml')) filename += '.yaml';
-    const config = editorGenerateConfig();
-    const saveBtn = document.getElementById('editor-save-btn');
-    setButtonLoading(saveBtn, true, t('saving'));
-    fetch('/api/config/generate-yaml', {
-        method: 'POST',
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify(config)
-    }).then(r => r.json()).then(data => {
-        if (!data.yaml) {
-            setButtonLoading(saveBtn, false);
-            editorSetStatus(t('statusYamlFailed'), true);
-            return;
-        }
-        return fetch('/api/config/save', {
-            method: 'POST',
-            headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({filename: filename, content: data.yaml})
-        });
-    }).then(r => { if (r) return r.json(); }).then(data => {
-        setButtonLoading(saveBtn, false);
-        if (data && data.ok) {
-            editorSetStatus(t('statusSaved', { name: filename }), false);
-            document.getElementById('editor-filename').value = filename;
-            clearEditorDirty();
-            loadConfigList(filename);
-            showToast(t('toastSaved'), 'success');
-        } else if (data) {
-            editorSetStatus(t('statusSaveFailed', { error: data.error || t('unknownError') }), true);
-            showToast(data.error || t('toastSaveFailed'), 'error');
-        }
-    }).catch(e => {
-        setButtonLoading(saveBtn, false);
-        editorSetStatus(t('statusRequestFailed', { error: e.message }), true);
-        showToast(t('toastSaveRequestFailed'), 'error');
+if (workingDirInput) {
+    const savedWorkingDir = localStorage.getItem(STORAGE_KEY_WORKING_DIR);
+    if (savedWorkingDir) workingDirInput.value = savedWorkingDir;
+    workingDirInput.addEventListener('change', () => {
+        const value = workingDirInput.value.trim();
+        if (value) localStorage.setItem(STORAGE_KEY_WORKING_DIR, value);
+        else localStorage.removeItem(STORAGE_KEY_WORKING_DIR);
     });
 }
 
-function editorLoad() {
-    const sel = document.getElementById('editor-load-select').value;
-    if (!sel) return;
-    if (editorDirty && !confirm(t('confirmLoadOverwrite'))) {
-        document.getElementById('editor-load-select').value = document.getElementById('editor-filename').value || '';
-        return;
-    }
-    apiFetch('/api/config/' + encodeURIComponent(sel))
-        .then((data) => apiFetch('/api/config/parse-yaml', {
-            method: 'POST',
-            headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({content: data.content})
-        }))
-        .then((parsed) => {
-            if (parsed.error) {
-                editorSetStatus(t('statusParseFailed', { error: parsed.error }), true);
-                return;
-            }
-            editorFillForm(parsed.config);
-            document.getElementById('editor-filename').value = sel;
-            syncConfigSelection(sel);
-            editorSetStatus(t('statusLoaded', { name: sel }), false);
-            showToast(t('toastLoaded', { name: sel }), 'info');
-        })
-        .catch((e) => editorSetStatus(t('statusLoadFailed') + ': ' + e.message, true));
-}
-
-function editorFillForm(cfg) {
-    editorSuppressDirty = true;
-    const task = cfg.task || {};
-    const cli = cfg.cli || {};
-    const exec = cfg.execution || {};
-    const disp = cfg.display || {};
-    document.getElementById('ed-task-name').value = task.name || '';
-    document.getElementById('ed-task-desc').value = task.description || '';
-    document.getElementById('ed-task-lang').value = task.language || '繁體中文';
-    document.getElementById('ed-task-output').value = task.output_dir || 'output';
-    document.getElementById('ed-cli-tool').value = cli.tool || 'opencode';
-    document.getElementById('ed-cli-model').value = cli.model || '';
-    document.getElementById('ed-cli-fullauto').checked = cli.full_auto === true;
-    document.getElementById('ed-cli-search').checked = cli.search === true;
-    document.getElementById('ed-cli-command').value = (cli.commands && cli.commands.run_session) || '';
-    editorUpdateCli();
-    document.getElementById('ed-exec-delay').value = exec.delay != null ? exec.delay : 1;
-    document.getElementById('ed-exec-timeout').value = exec.timeout != null ? exec.timeout : 300;
-    document.getElementById('ed-exec-retries').value = exec.max_retries != null ? exec.max_retries : 5;
-    document.getElementById('ed-exec-rounds').value = exec.max_rounds != null ? exec.max_rounds : 0;
-    document.getElementById('ed-exec-switch-rounds').value = exec.switch_after_rounds != null ? exec.switch_after_rounds : 0;
-    document.getElementById('ed-max-tokens').value = exec.max_tokens != null ? exec.max_tokens : 128000;
-    document.getElementById('ed-token-threshold').value = exec.token_threshold != null ? exec.token_threshold : 0.7;
-    document.getElementById('ed-exec-continue').checked = exec.auto_continue_on_error !== false;
-    document.getElementById('ed-disp-session').checked = disp.show_session_id !== false;
-    document.getElementById('ed-disp-token').checked = disp.show_token_usage !== false;
-    document.getElementById('ed-disp-time').checked = disp.show_timestamp !== false;
-    document.getElementById('ed-prompts-container').innerHTML = '';
-    edPromptCounter = 0;
-    const prompts = cfg.prompts || [''];
-    prompts.forEach(p => editorAddPrompt(typeof p === 'string' ? p : ''));
-    document.getElementById('ed-summary-prompt').value = cfg.summary_prompt || t('defaultSummary');
-    document.getElementById('ed-task-name').classList.remove('field-invalid');
-    editorSuppressDirty = false;
-    clearEditorDirty();
-}
-
-function editorReset() {
-    if (!confirm(t('confirmReset'))) return;
-    editorFillForm({});
-    document.getElementById('editor-filename').value = '';
-    editorSetStatus(t('statusCleared'), false);
-}
-
-function editorSetStatus(msg, isError) {
-    editorStatusBar.hidden = !msg;
-    editorStatusText.textContent = msg || '';
-    editorStatusText.style.color = isError ? 'var(--danger)' : 'var(--success)';
-}
-
-document.getElementById('ed-add-prompt-btn').addEventListener('click', () => {
-    editorAddPrompt('');
-    markEditorDirty();
-});
-document.getElementById('editor-save-btn').addEventListener('click', editorSave);
-document.getElementById('editor-reset-btn').addEventListener('click', editorReset);
-
-document.querySelector('.editor-form-scroll').addEventListener('input', (e) => {
-    if (e.target.matches('input, textarea, select')) markEditorDirty();
-});
-document.querySelector('.editor-form-scroll').addEventListener('change', (e) => {
-    if (e.target.matches('input[type="checkbox"], select')) markEditorDirty();
-});
-
-// ===== AI Generate Modal Logic =====
-function aigenOpen() {
-    const modal = document.getElementById('aigen-modal');
-    const editorLang = document.getElementById('ed-task-lang').value;
-    if (editorLang) document.getElementById('aigen-lang').value = editorLang;
-    aigenUpdatePreview();
-    modal.classList.add('open');
-    document.getElementById('aigen-task-input').focus();
-}
-
-function aigenClose() {
-    document.getElementById('aigen-modal').classList.remove('open');
-    document.getElementById('aigen-status').textContent = '';
-}
-
-function aigenCloseOnBackdrop(event) {
-    if (event.target.id === 'aigen-modal') aigenClose();
-}
-
-function aigenExtractYaml(text) {
-    const fenced = text.match(/```(?:yaml|yml)?\s*([\s\S]*?)```/i);
-    return (fenced ? fenced[1] : text).trim();
-}
-
-function aigenApplyYaml() {
-    const raw = document.getElementById('aigen-yaml-input').value.trim();
-    if (!raw) {
-        aigenSetStatus(t('toastPasteYaml'), true);
-        return;
-    }
-    const content = aigenExtractYaml(raw);
-    fetch('/api/config/parse-yaml', {
-        method: 'POST',
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({content: content})
-    }).then(r => r.json()).then(parsed => {
-        if (parsed.error) {
-            aigenSetStatus(t('statusParseFailed', { error: parsed.error }), true);
-            return;
-        }
-        editorFillForm(parsed.config);
-        markEditorDirty();
-        aigenClose();
-        switchTab('editor', true);
-        editorSetStatus(t('statusAiApplied'), false);
-        showToast(t('toastAiApplied'), 'success');
-    }).catch(e => aigenSetStatus(t('statusRequestFailed', { error: e.message }), true));
-}
-
-function aigenSetStatus(msg, isError) {
-    const status = document.getElementById('aigen-status');
-    status.textContent = msg;
-    status.style.color = isError ? 'var(--danger)' : 'var(--success)';
-}
-
-function aigenBuildPrompt() {
-    const taskInput = document.getElementById('aigen-task-input').value.trim();
-    const lang = document.getElementById('aigen-lang').value;
-    return buildAigenPrompt(taskInput, lang);
-}
-
-function aigenUpdatePreview() {
-    document.getElementById('aigen-preview').textContent = aigenBuildPrompt();
-}
-
-function aigenCopy() {
-    const text = aigenBuildPrompt();
-    navigator.clipboard.writeText(text).then(() => {
-        aigenSetStatus(t('aigenCopied'), false);
-        showToast(t('toastPromptCopied'), 'success');
-        setTimeout(() => { document.getElementById('aigen-status').textContent = ''; }, 2500);
-    }).catch(() => {
-        const ta = document.createElement('textarea');
-        ta.value = text;
-        ta.style.position = 'fixed';
-        ta.style.opacity = '0';
-        document.body.appendChild(ta);
-        ta.select();
-        document.execCommand('copy');
-        document.body.removeChild(ta);
-        aigenSetStatus(t('aigenCopied'), false);
-        showToast(t('toastPromptCopied'), 'success');
-    });
-}
-
-document.getElementById('editor-aigen-btn').addEventListener('click', aigenOpen);
-document.getElementById('aigen-copy-btn').addEventListener('click', aigenCopy);
-document.getElementById('aigen-apply-btn').addEventListener('click', aigenApplyYaml);
-document.getElementById('aigen-task-input').addEventListener('input', aigenUpdatePreview);
-document.getElementById('aigen-lang').addEventListener('change', aigenUpdatePreview);
-
-document.addEventListener('keydown', (event) => {
-    if (event.key === 'Escape') aigenClose();
-    if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 's') {
-        if (!document.getElementById('tab-editor').hidden) {
-            event.preventDefault();
-            editorSave();
-        }
-    }
-});
-
-// Init
 updateAppStatusBadge();
 connectSSE();
 scheduleStatusPoll();
@@ -718,8 +398,4 @@ document.addEventListener('visibilitychange', () => {
         scheduleStatusPoll();
     }
 });
-loadConfigList().then(() => {
-    const savedTab = localStorage.getItem(STORAGE_KEY_TAB);
-    if (savedTab === 'editor') switchTab('editor', true);
-});
-editorAddPrompt('');
+loadConfigList();

@@ -2,6 +2,7 @@
 """Smoke tests for OpenCode Infinity."""
 from __future__ import annotations
 
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -91,18 +92,6 @@ class SmokeTests(unittest.TestCase):
             self.assertEqual(config.execution.max_tokens, 128000)
             self.assertEqual(config.execution.token_threshold, 0.7)
 
-    def test_legacy_opencode_token_settings_fallback(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            config_path = Path(tmp) / "legacy.yaml"
-            config_path.write_text(
-                "cli:\n  tool: opencode\nexecution:\n  delay: 1\nopencode:\n  max_tokens: 64000\n  token_threshold: 0.5\n  model: opencode/mimo-v2.5-free\nprompts:\n  - go\n",
-                encoding="utf-8",
-            )
-            config = self.mod.ConfigLoader(config_path).load()
-            self.assertEqual(config.execution.max_tokens, 64000)
-            self.assertEqual(config.execution.token_threshold, 0.5)
-            self.assertEqual(config.cli.model, "opencode/mimo-v2.5-free")
-
     def test_opencode_adapter_model_flag(self) -> None:
         cfg = self.mod.CLIConfig(tool="opencode", model="opencode/deepseek-v4-flash-free")
         with patch.object(self.mod.shutil, "which", return_value="/usr/bin/opencode"):
@@ -171,6 +160,62 @@ class SmokeTests(unittest.TestCase):
 
             self.assertIn("codex.yaml", client.get("/api/configs").get_json()["configs"])
             self.assertFalse(client.get("/api/status").get_json()["running"])
+
+    def test_resolve_execution_working_dir_from_yaml(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            config_path = Path(tmp) / "codex.yaml"
+            config_path.write_text(
+                "cli:\n  tool: codex\nexecution:\n  working_dir: "
+                + repr(tmp).replace("'", '"')
+                + "\n",
+                encoding="utf-8",
+            )
+            config = self.mod.ConfigLoader(config_path).load()
+            resolved = self.mod._resolve_execution_working_dir(config)
+            self.assertEqual(resolved, Path(tmp).resolve())
+
+    def test_gui_override_working_dir(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            with tempfile.TemporaryDirectory() as other:
+                config_path = Path(tmp) / "configs" / "codex.yaml"
+                config_path.parent.mkdir(parents=True)
+                config_path.write_text("cli:\n  tool: codex\n", encoding="utf-8")
+                self.mod.init_config_dir(str(config_path.parent))
+                config = self.mod.ConfigLoader(config_path).load()
+                resolved = self.mod._resolve_execution_working_dir(
+                    config, override=other
+                )
+                self.assertEqual(resolved, Path(other).resolve())
+
+    def test_api_start_rejects_invalid_working_dir(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            self.mod.init_config_dir(tmp)
+            self.mod._create_factory_templates(Path(tmp))
+            client = self.mod._create_flask_app().test_client()
+            response = client.post(
+                "/api/start",
+                json={
+                    "config": "codex.yaml",
+                    "working_dir": str(Path(tmp) / "missing-dir"),
+                },
+            )
+            self.assertEqual(response.status_code, 400)
+            self.assertFalse(response.get_json()["ok"])
+
+    def test_executor_passes_subprocess_cwd(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            working_dir = Path(tmp).resolve()
+            executor = self.mod.Executor(working_dir=working_dir)
+            with patch.object(self.mod.subprocess, "run") as mock_run:
+                mock_run.return_value = subprocess.CompletedProcess(
+                    args=["echo"], returncode=0, stdout=b"", stderr=b""
+                )
+                executor.run_with_retry(
+                    command=["echo", "ok"],
+                    timeout=5,
+                    max_retries=0,
+                )
+            self.assertEqual(mock_run.call_args.kwargs.get("cwd"), str(working_dir))
 
 
 if __name__ == "__main__":

@@ -8,7 +8,7 @@
 <link rel="stylesheet" href="/gui/styles.css">
 </head>
 <body>
-<main>
+<main class="app-shell">
     <header class="app-header">
         <div class="brand">
             <div class="brand-icon" aria-hidden="true">∞</div>
@@ -28,49 +28,57 @@
         </div>
     </header>
 
-    <nav class="tab-nav" aria-label="Main menu">
-        <a href="#" class="active" data-tab="console" data-i18n="tabConsole" onclick="switchTab('console'); return false;">控制台</a>
-        <a href="#" data-tab="editor" data-i18n="tabEditor" onclick="switchTab('editor'); return false;">設定編輯器</a>
-    </nav>
+    <aside class="config-hint" data-i18n="configHint">設定檔請手動編輯 YAML（見啟動日誌中的 config 目錄）。</aside>
 
-    <!-- Console Tab -->
-    <section class="tab-content" id="tab-console">
-        <div class="panel">
-            <div class="console-toolbar">
-                <div class="field-group">
-                    <span class="field-label" data-i18n="labelConfigFile">設定檔</span>
+    <section id="tab-console" class="workspace">
+        <div class="control-card">
+            <div class="control-top">
+                <div class="field-group field-group-grow">
+                    <label class="field-label" for="config-select" data-i18n="labelConfigFile">設定檔</label>
                     <select id="config-select"><option value="" data-i18n="loading">載入中...</option></select>
                 </div>
-                <div class="console-actions">
-                    <button class="js-create-templates-btn secondary outline" type="button" data-i18n="btnCreateTemplates">建立範本</button>
-                    <button id="refresh-configs-btn" class="secondary outline btn-icon" type="button" data-i18n-title="refreshConfigs" title="重新載入設定檔列表">↻</button>
-                    <button id="start-btn" class="btn-start" type="button" data-i18n="btnStart">▶ 啟動</button>
-                    <button id="stop-btn" class="secondary btn-stop" type="button" data-i18n="btnStop" disabled>⏹ 停止</button>
+                <div class="action-group" role="group" aria-label="Actions">
+                    <button class="js-create-templates-btn btn-secondary" type="button" data-i18n="btnCreateTemplates">建立範本</button>
+                    <button id="refresh-configs-btn" class="btn-secondary btn-icon" type="button" data-i18n-title="refreshConfigs" title="重新載入設定檔列表" aria-label="Refresh">↻</button>
+                    <button id="start-btn" class="btn-primary" type="button" data-i18n="btnStart">▶ 啟動</button>
+                    <button id="stop-btn" class="btn-danger" type="button" data-i18n="btnStop" disabled>⏹ 停止</button>
                 </div>
             </div>
+
+            <div class="metrics-row" aria-label="Statistics">
+                <div class="stat-card" id="stat-card-rounds">
+                    <span class="stat-label" data-i18n="statRounds">輪次</span>
+                    <span class="stat-value" id="stat-rounds">0</span>
+                </div>
+                <div class="stat-card">
+                    <span class="stat-label" data-i18n="statSessions">Session</span>
+                    <span class="stat-value" id="stat-sessions">0</span>
+                </div>
+                <div class="stat-card">
+                    <span class="stat-label" data-i18n="statElapsed">耗時</span>
+                    <span class="stat-value" id="stat-elapsed">0:00</span>
+                </div>
+            </div>
+
             <details class="console-advanced">
                 <summary data-i18n="advancedOptions">進階選項</summary>
-                <div class="control-row session-row">
-                    <input type="text" id="session-id" data-i18n-placeholder="sessionPlaceholder" placeholder="Session ID（留空自動生成）">
-                    <button id="copy-session-btn" class="secondary outline btn-icon" type="button" data-i18n-title="copySession" title="複製 Session ID" disabled>⎘</button>
+                <div class="advanced-grid">
+                    <div class="field-group">
+                        <label class="field-label" for="working-dir" data-i18n="labelWorkingDir">工作目錄</label>
+                        <input type="text" id="working-dir" data-i18n-placeholder="workingDirPlaceholder" placeholder="工作目錄（留空沿用啟動目錄或 YAML 設定）">
+                    </div>
+                    <div class="field-group">
+                        <label class="field-label" for="session-id" data-i18n="labelSession">Session ID</label>
+                        <div class="input-with-btn">
+                            <input type="text" id="session-id" data-i18n-placeholder="sessionPlaceholder" placeholder="Session ID（留空自動生成）">
+                            <button id="copy-session-btn" class="btn-secondary btn-icon" type="button" data-i18n-title="copySession" title="複製 Session ID" aria-label="Copy session" disabled>⎘</button>
+                        </div>
+                    </div>
                 </div>
             </details>
-            <div class="stats-row">
-                <div class="stat-card">
-                    <span class="stat-value" id="stat-rounds">0</span>
-                    <span class="stat-label" data-i18n="statRounds">輪次</span>
-                </div>
-                <div class="stat-card">
-                    <span class="stat-value" id="stat-sessions">0</span>
-                    <span class="stat-label" data-i18n="statSessions">Session</span>
-                </div>
-                <div class="stat-card">
-                    <span class="stat-value" id="stat-elapsed">0:00</span>
-                    <span class="stat-label" data-i18n="statElapsed">耗時</span>
-                </div>
-            </div>
         </div>
-        <div class="log-panel-wrap">
+
+        <div class="log-card">
             <div class="log-panel-header">
                 <span class="log-panel-title" data-i18n="logTitle">即時日誌</span>
                 <div class="log-panel-actions">
@@ -83,138 +91,6 @@
             </div>
         </div>
     </section>
-
-    <!-- Editor Tab -->
-    <section class="tab-content" id="tab-editor" hidden>
-        <div class="editor-form">
-            <div class="editor-toolbar">
-                <select id="editor-load-select" onchange="editorLoad()"><option value="" data-i18n="selectConfig">選擇設定檔</option></select>
-                <input type="text" id="editor-filename" data-i18n-placeholder="filenamePlaceholder" placeholder="檔案名稱.yaml">
-                <div class="toolbar-actions">
-                    <button class="js-create-templates-btn secondary outline" type="button" data-i18n="btnCreateTemplates">建立範本</button>
-                    <button id="editor-aigen-btn" class="secondary" type="button" data-i18n="btnAiGen">AI 生成</button>
-                    <button id="editor-save-btn" type="button" data-i18n="btnSave">保存</button>
-                    <button id="editor-reset-btn" class="contrast outline" type="button" data-i18n="btnReset">清空</button>
-                </div>
-            </div>
-            <div id="editor-status" class="editor-status-bar" hidden>
-                <span id="editor-status-text"></span>
-                <span id="editor-dirty-badge" class="dirty-badge" data-i18n="dirtyBadge" hidden>未保存</span>
-            </div>
-            <div class="editor-form-scroll">
-                <div class="editor-main-grid">
-                    <div class="editor-col-left">
-                        <div class="card">
-                            <details open>
-                                <summary><span data-i18n="sectionTask">任務與工具</span> <span class="required">*</span></summary>
-                                <div class="card-content">
-                                    <label><span data-i18n="labelName">名稱</span><input type="text" id="ed-task-name" data-i18n-placeholder="placeholderTaskName" placeholder="例如：API 開發"></label>
-                                    <div class="grid2">
-                                        <label><span data-i18n="labelTool">工具</span><select id="ed-cli-tool" onchange="editorUpdateCli()"><option value="opencode">OpenCode</option><option value="claude">Claude</option><option value="codex">Codex</option><option value="copilot">Copilot</option></select></label>
-                                        <label><span data-i18n="labelLanguage">語言</span><select id="ed-task-lang"><option value="繁體中文">繁體中文</option><option value="English">English</option></select></label>
-                                    </div>
-                                    <label><span data-i18n="labelModel">模型</span><input type="text" id="ed-cli-model" data-i18n-placeholder="placeholderModel" placeholder="留空使用預設"></label>
-                                    <div class="grid2">
-                                        <label><span data-i18n="labelOutputDir">輸出目錄</span><input type="text" id="ed-task-output" value="output" placeholder="output"></label>
-                                        <label><span data-i18n="labelDesc">描述</span><input type="text" id="ed-task-desc" data-i18n-placeholder="placeholderDesc" placeholder="選填"></label>
-                                    </div>
-                                    <div id="ed-codex-options" hidden class="checkbox-row">
-                                        <label><input type="checkbox" id="ed-cli-fullauto"> <span data-i18n="labelFullAuto">Full Auto</span> <span class="help-icon" data-i18n-tooltip="tooltipFullAuto">?<span class="tooltip"></span></span></label>
-                                        <label><input type="checkbox" id="ed-cli-search"> <span data-i18n="labelSearch">Search</span> <span class="help-icon" data-i18n-tooltip="tooltipSearch">?<span class="tooltip"></span></span></label>
-                                    </div>
-                                    <label><span data-i18n="labelCustomCmd">自訂指令</span> <span class="help-icon" data-i18n-tooltip="tooltipCustomCmd">?<span class="tooltip"></span></span><input type="text" id="ed-cli-command" data-i18n-placeholder="placeholderCmd" placeholder="留空使用預設指令"></label>
-                                </div>
-                            </details>
-                        </div>
-                    </div>
-                    <div class="editor-col-right">
-                        <div class="card">
-                            <details open>
-                                <summary><span data-i18n="sectionPrompts">循環提示詞</span> <span class="required">*</span></summary>
-                                <div class="card-content">
-                                    <div id="ed-prompts-container"></div>
-                                    <button class="secondary outline" id="ed-add-prompt-btn" data-i18n="btnAddPrompt">+ 添加提示詞</button>
-                                </div>
-                            </details>
-                        </div>
-                    </div>
-                </div>
-                <div class="editor-bottom">
-                    <div class="card">
-                        <details>
-                            <summary data-i18n="sectionExec">執行設定</summary>
-                            <div class="card-content">
-                                <div class="grid3">
-                                    <label><span data-i18n="labelDelay">延遲 (秒)</span><input type="number" id="ed-exec-delay" value="1" min="0"></label>
-                                    <label><span data-i18n="labelTimeout">超時 (秒)</span><input type="number" id="ed-exec-timeout" value="300" min="0"></label>
-                                    <label><span data-i18n="labelRetries">重試</span><input type="number" id="ed-exec-retries" value="5" min="0"></label>
-                                    <label><span data-i18n="labelMaxRounds">輪次</span><input type="number" id="ed-exec-rounds" value="0" min="0" data-i18n-placeholder="placeholderRounds" placeholder="0 = 無限"></label>
-                                    <label><span data-i18n="labelSwitchRounds">切換輪次</span><input type="number" id="ed-exec-switch-rounds" value="0" min="0" data-i18n-placeholder="placeholderSwitchRounds" placeholder="0 = 不切換"></label>
-                                    <label class="checkbox-inline"><input type="checkbox" id="ed-exec-continue" checked> <span data-i18n="labelContinueOnError">錯誤時繼續</span></label>
-                                </div>
-                                <div class="grid2">
-                                    <label><span data-i18n="labelMaxTokens">Max Tokens</span> <span class="help-icon" data-i18n-tooltip="tooltipMaxTokens">?<span class="tooltip"></span></span><input type="number" id="ed-max-tokens" value="128000" min="0"></label>
-                                    <label><span data-i18n="labelTokenThreshold">Token 閾值</span> <span class="help-icon" data-i18n-tooltip="tooltipTokenThreshold">?<span class="tooltip"></span></span><input type="number" id="ed-token-threshold" value="0.7" min="0" max="1" step="0.1"></label>
-                                </div>
-                            </div>
-                        </details>
-                    </div>
-                    <div class="card">
-                        <details>
-                            <summary data-i18n="sectionAdvanced">進階設定</summary>
-                            <div class="card-content">
-                                <div class="checkbox-row">
-                                    <label><input type="checkbox" id="ed-disp-session" checked> <span data-i18n="labelShowSession">顯示 Session ID</span></label>
-                                    <label><input type="checkbox" id="ed-disp-token" checked> <span data-i18n="labelShowToken">顯示 Token 用量</span></label>
-                                    <label><input type="checkbox" id="ed-disp-time" checked> <span data-i18n="labelShowTime">顯示時間戳</span></label>
-                                </div>
-                                <label><span data-i18n="labelSummaryPrompt">總結提示詞</span> <span class="help-icon" data-i18n-tooltip="tooltipSummary">?<span class="tooltip"></span></span></label>
-                                <textarea id="ed-summary-prompt" rows="3">總結本輪工作（300字內）</textarea>
-                            </div>
-                        </details>
-                    </div>
-                </div>
-            </div>
-        </div>
-    </section>
-
-    <!-- AI Generate Modal -->
-    <div class="modal-overlay" id="aigen-modal" onclick="aigenCloseOnBackdrop(event)">
-        <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="aigen-modal-title">
-            <div class="modal-header">
-                <h3 id="aigen-modal-title" data-i18n="modalTitle">AI 生成設定</h3>
-                <button class="modal-close" type="button" onclick="aigenClose()" data-i18n-attr="aria-label" data-i18n="modalClose" aria-label="關閉">×</button>
-            </div>
-            <div class="modal-body">
-                <div class="modal-step">
-                    <p class="modal-step-title" data-i18n="aigenStep1">步驟 1 · 生成 Prompt</p>
-                    <p class="modal-step-hint" data-i18n="aigenStep1Hint">描述你的任務，複製 Prompt 到外部 AI 工具。</p>
-                    <label class="field-label-block" data-i18n="aigenTaskLabel">任務簡述</label>
-                    <textarea id="aigen-task-input" rows="3" data-i18n-placeholder="aigenTaskPlaceholder" placeholder="例如：分析 2024 年最佳 React UI 框架，整理成比較表"></textarea>
-                    <div class="modal-actions">
-                        <select id="aigen-lang">
-                            <option value="繁體中文">繁體中文</option>
-                            <option value="English">English</option>
-                        </select>
-                        <button id="aigen-copy-btn" data-i18n="aigenCopy">複製 Prompt</button>
-                        <span id="aigen-status"></span>
-                    </div>
-                    <details class="modal-preview-toggle">
-                        <summary data-i18n="aigenPreview">預覽 Prompt</summary>
-                        <pre id="aigen-preview" class="modal-preview"></pre>
-                    </details>
-                </div>
-                <div class="modal-step">
-                    <p class="modal-step-title" data-i18n="aigenStep2">步驟 2 · 套用結果</p>
-                    <p class="modal-step-hint" data-i18n="aigenStep2Hint">將 AI 回覆的 YAML 貼上並套用到編輯器。</p>
-                    <textarea id="aigen-yaml-input" class="code-input" rows="6" data-i18n-placeholder="aigenYamlPlaceholder" placeholder="貼上 AI 生成的 YAML（可含 ```yaml 代碼塊）"></textarea>
-                    <div class="modal-actions">
-                        <button id="aigen-apply-btn" data-i18n="aigenApply">套用到編輯器</button>
-                    </div>
-                </div>
-            </div>
-        </div>
-    </div>
 </main>
 <div id="toast-root" class="toast-root" aria-live="polite" aria-atomic="true"></div>
 <script src="/gui/i18n.js"></script>
