@@ -2,6 +2,7 @@
 """Smoke tests for OpenCode Infinity."""
 from __future__ import annotations
 
+import os
 import subprocess
 import sys
 import tempfile
@@ -98,8 +99,23 @@ class SmokeTests(unittest.TestCase):
             adapter = self.mod.OpenCodeAdapter(cfg)
         self.assertEqual(
             adapter.build_run_command("hi"),
-            ["opencode", "run", "-m", "opencode/deepseek-v4-flash-free", "hi"],
+            [
+                "/usr/bin/opencode",
+                "run",
+                "--print-logs",
+                "-m",
+                "opencode/deepseek-v4-flash-free",
+                "hi",
+            ],
         )
+
+    def test_ensure_windows_user_path_adds_npm(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            npm_dir = Path(tmp) / "npm"
+            npm_dir.mkdir()
+            with patch.dict(os.environ, {"APPDATA": tmp, "PATH": ""}, clear=False):
+                self.mod._ensure_windows_user_path()
+                self.assertIn(str(npm_dir), os.environ["PATH"])
 
     def test_validate_session_id(self) -> None:
         self.assertTrue(self.mod._validate_session_id("ses_abc123"))

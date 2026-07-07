@@ -3,11 +3,14 @@
 
 自動化 AI 編碼工具的無限循環執行器，支援 OpenCode、Claude Code、Codex、Copilot。
 """
+
 from __future__ import annotations
 
 # =============================================================================
 # 標準庫 imports
 # =============================================================================
+import itertools
+import random
 import socket
 import ctypes
 import json
@@ -101,7 +104,9 @@ def _eprint(*args: object, **kwargs: object) -> None:
         print(text, **kwargs)
     except UnicodeEncodeError:
         encoding = getattr(file, "encoding", None) or "utf-8"
-        safe = text.encode(encoding, errors="replace").decode(encoding, errors="replace")
+        safe = text.encode(encoding, errors="replace").decode(
+            encoding, errors="replace"
+        )
         print(safe, **{k: v for k, v in kwargs.items() if k != "file"}, file=file)
 
 
@@ -147,7 +152,12 @@ def _pick_listen_port(preferred: int) -> int:
     raise ConfigError(f"No available local port found near {preferred}")
 
 
-def safe_int(value: object, default: int, minimum: Optional[int] = None, maximum: Optional[int] = None) -> int:
+def safe_int(
+    value: object,
+    default: int,
+    minimum: Optional[int] = None,
+    maximum: Optional[int] = None,
+) -> int:
     """Convert a value to int with range validation and safe fallback."""
     try:
         converted = int(value)
@@ -160,7 +170,9 @@ def safe_int(value: object, default: int, minimum: Optional[int] = None, maximum
     return converted
 
 
-def compact_strings(items: Iterable[Optional[str]], *, strip: bool = True, drop_empty: bool = True) -> list[str]:
+def compact_strings(
+    items: Iterable[Optional[str]], *, strip: bool = True, drop_empty: bool = True
+) -> list[str]:
     """Normalize a string sequence by removing None and blanks."""
     result: list[str] = []
     for item in items:
@@ -173,7 +185,9 @@ def compact_strings(items: Iterable[Optional[str]], *, strip: bool = True, drop_
     return result
 
 
-def flatten_dict(mapping: Mapping[str, object], *, separator: str = ".", prefix: str = "") -> dict[str, object]:
+def flatten_dict(
+    mapping: Mapping[str, object], *, separator: str = ".", prefix: str = ""
+) -> dict[str, object]:
     """Flatten nested dictionaries into a single-level dotted-key mapping."""
     flattened: dict[str, object] = {}
     stack: list[tuple[str, Mapping[str, object]]] = [(prefix, mapping)]
@@ -188,7 +202,9 @@ def flatten_dict(mapping: Mapping[str, object], *, separator: str = ".", prefix:
     return flattened
 
 
-def diff_mapping(before: Mapping[str, object], after: Mapping[str, object], *, separator: str = ".") -> dict[str, tuple[object, object]]:
+def diff_mapping(
+    before: Mapping[str, object], after: Mapping[str, object], *, separator: str = "."
+) -> dict[str, tuple[object, object]]:
     """Return flattened key-level differences between two mappings."""
     before_flat = flatten_dict(dict(before), separator=separator)
     after_flat = flatten_dict(dict(after), separator=separator)
@@ -199,6 +215,114 @@ def diff_mapping(before: Mapping[str, object], after: Mapping[str, object], *, s
     }
 
 
+_SLUGIFY_RE: re.Pattern[str] = re.compile(r"[^\w\s-]")
+_SLUGIFY_WHITESPACE_RE: re.Pattern[str] = re.compile(r"[-\s]+")
+
+
+def slugify(text: str, *, lower: bool = True, separator: str = "-") -> str:
+    """Convert a string to a URL/filesystem-safe slug."""
+    result = _SLUGIFY_RE.sub("", text).strip()
+    result = _SLUGIFY_WHITESPACE_RE.sub(separator, result)
+    return result.lower() if lower else result
+
+
+def chunk_iterable(items: Iterable[object], size: int) -> list[list[object]]:
+    """Split an iterable into fixed-size chunks (last chunk may be smaller)."""
+    iterator = iter(items)
+    chunks: list[list[object]] = []
+    while True:
+        chunk = list(itertools.islice(iterator, size))
+        if not chunk:
+            break
+        chunks.append(chunk)
+    return chunks
+
+
+def format_bytes(n: int, *, decimal: bool = False) -> str:
+    """Format a byte count as a human-readable string (e.g. 1.5 KiB)."""
+    if decimal:
+        units = ("B", "KB", "MB", "GB", "TB", "PB")
+        divisor = 1000.0
+    else:
+        units = ("B", "KiB", "MiB", "GiB", "TiB", "PiB")
+        divisor = 1024.0
+    if n < divisor:
+        return f"{n} {units[0]}"
+    for unit in units[1:]:
+        n /= divisor
+        if abs(n) < divisor:
+            return f"{n:.1f} {unit}"
+    return f"{n:.1f} {units[-1]}"
+
+
+def merge_dicts_deep(*dicts: Mapping[str, object]) -> dict[str, object]:
+    """Deep-merge multiple dictionaries (later dicts override earlier ones)."""
+    result: dict[str, object] = {}
+    for d in dicts:
+        for key, value in d.items():
+            if (
+                key in result
+                and isinstance(result[key], dict)
+                and isinstance(value, dict)
+            ):
+                result[key] = merge_dicts_deep(result[key], value)
+            else:
+                result[key] = value
+    return result
+
+
+_ID_CHARS: str = "abcdefghijklmnopqrstuvwxyz0123456789"
+
+
+def generate_short_id(length: int = 8) -> str:
+    """Generate a short alphanumeric ID (not cryptographically secure)."""
+    return "".join(random.choice(_ID_CHARS) for _ in range(length))
+
+
+def ensure_dir(path: Path, *, mode: int = 0o755) -> Path:
+    """Ensure a directory exists and is writable; raise on failure."""
+    path.mkdir(parents=True, exist_ok=True)
+    if not path.is_dir():
+        raise OSError(f"Not a directory: {path}")
+    return path
+
+
+_DURATION_RE: re.Pattern[str] = re.compile(
+    r"(?:(\d+)\s*d(?:ays?)?\s*)?"
+    r"(?:(\d+)\s*h(?:ours?)?\s*)?"
+    r"(?:(\d+)\s*m(?:in(?:utes?)?)?\s*)?"
+    r"(?:(\d+)\s*s(?:ec(?:onds?)?)?\s*)?",
+    re.IGNORECASE,
+)
+
+
+def parse_duration(text: str, *, default: int = 0) -> int:
+    """Parse a human-readable duration string into seconds.
+
+    Supported formats: "1d", "2h30m", "45s", "1d 6h", "30m".
+    """
+    text = text.strip()
+    if not text:
+        return default
+    match = _DURATION_RE.fullmatch(text)
+    if not match:
+        return default
+    days, hours, minutes, seconds = (int(v) if v else 0 for v in match.groups())
+    return days * 86400 + hours * 3600 + minutes * 60 + seconds
+
+
+_INVALID_FILENAME_CHARS_RE: re.Pattern[str] = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
+
+
+def safe_filename(text: str, *, replacement: str = "_", max_length: int = 128) -> str:
+    """Strip or replace characters that are invalid in filenames."""
+    result = _INVALID_FILENAME_CHARS_RE.sub(replacement, text).strip()
+    result = _SLUGIFY_WHITESPACE_RE.sub(replacement, result)
+    if not result:
+        result = "untitled"
+    return result[:max_length].rstrip(". ")
+
+
 # =============================================================================
 # 資料模型 (models)
 # =============================================================================
@@ -207,6 +331,7 @@ def diff_mapping(before: Mapping[str, object], after: Mapping[str, object], *, s
 @dataclass(frozen=True)
 class TaskConfig:
     """Task-level configuration."""
+
     name: str = "通用任務"
     description: str = ""
     language: str = "繁體中文"
@@ -216,6 +341,7 @@ class TaskConfig:
 @dataclass(frozen=True)
 class CLIConfig:
     """CLI tool configuration."""
+
     tool: str = "opencode"
     full_auto: bool = False
     model: Optional[str] = None
@@ -228,6 +354,7 @@ class CLIConfig:
 @dataclass(frozen=True)
 class ExecutionConfig:
     """Execution parameters configuration."""
+
     delay: int = 1
     timeout: int = 300
     max_retries: int = 5
@@ -243,6 +370,7 @@ class ExecutionConfig:
 @dataclass(frozen=True)
 class DisplayConfig:
     """Display settings configuration."""
+
     show_session_id: bool = True
     show_timestamp: bool = True
 
@@ -250,6 +378,7 @@ class DisplayConfig:
 @dataclass(frozen=True)
 class AppConfig:
     """Top-level application configuration combining all sections."""
+
     task: TaskConfig = field(default_factory=TaskConfig)
     cli: CLIConfig = field(default_factory=CLIConfig)
     execution: ExecutionConfig = field(default_factory=ExecutionConfig)
@@ -261,6 +390,7 @@ class AppConfig:
 @dataclass
 class SanitizeResult:
     """Result of input sanitization check."""
+
     is_safe: bool
     sanitized_text: str = ""
     rejection_reason: str = ""
@@ -269,6 +399,7 @@ class SanitizeResult:
 @dataclass
 class RetryError:
     """Record of a single retry failure."""
+
     attempt: int
     timestamp: str  # ISO 8601
     return_code: Optional[int] = None
@@ -279,6 +410,7 @@ class RetryError:
 @dataclass
 class ExecutionResult:
     """Structured result of a command execution with retry information."""
+
     success: bool
     return_code: int
     duration_seconds: float
@@ -291,12 +423,14 @@ class ExecutionResult:
 @dataclass
 class ValidationError:
     """Configuration validation error or warning."""
+
     field_path: str
     message: str
     severity: str = "error"  # error | warning
 
 
 # Custom exception hierarchy
+
 
 class OpenCodeInfinityError(Exception):
     """Base exception for all system errors."""
@@ -394,9 +528,9 @@ class ColoredConsoleFormatter(logging.Formatter):
         color = _LEVEL_COLORS.get(record.levelno, "")
         levelname = record.levelname
         message = record.getMessage()
-        timestamp = datetime.fromtimestamp(
-            record.created, tz=timezone.utc
-        ).strftime("%Y-%m-%dT%H:%M:%S")
+        timestamp = datetime.fromtimestamp(record.created, tz=timezone.utc).strftime(
+            "%Y-%m-%dT%H:%M:%S"
+        )
         return f"{color}{timestamp} [{levelname}] {record.name}: {message}{_RESET}"
 
 
@@ -535,6 +669,7 @@ SUMMARY_PROMPT_DEFAULT: str = "總結本輪工作（300字內）"
 
 class FieldType(Enum):
     """Supported configuration field types."""
+
     STR = "str"
     INT = "int"
     FLOAT = "float"
@@ -547,6 +682,7 @@ class FieldType(Enum):
 @dataclass(frozen=True)
 class FieldSchema:
     """Schema descriptor for a single configuration field."""
+
     field_type: FieldType
     required: bool = False
     min_value: Optional[float] = None
@@ -562,7 +698,11 @@ TASK_SCHEMA: dict[str, FieldSchema] = {
 }
 
 CLI_SCHEMA: dict[str, FieldSchema] = {
-    "tool": FieldSchema(field_type=FieldType.STR, required=True, valid_values=("opencode", "claude", "codex", "copilot")),
+    "tool": FieldSchema(
+        field_type=FieldType.STR,
+        required=True,
+        valid_values=("opencode", "claude", "codex", "copilot"),
+    ),
     "full_auto": FieldSchema(field_type=FieldType.BOOL, required=False),
     "model": FieldSchema(field_type=FieldType.OPTIONAL_STR, required=False),
     "search": FieldSchema(field_type=FieldType.BOOL, required=False),
@@ -577,10 +717,18 @@ EXECUTION_SCHEMA: dict[str, FieldSchema] = {
     "max_retries": FieldSchema(field_type=FieldType.INT, required=False, min_value=0),
     "auto_continue_on_error": FieldSchema(field_type=FieldType.BOOL, required=False),
     "max_rounds": FieldSchema(field_type=FieldType.INT, required=False, min_value=0),
-    "switch_after_rounds": FieldSchema(field_type=FieldType.INT, required=False, min_value=0),
-    "switch_strategy": FieldSchema(field_type=FieldType.STR, required=False, valid_values=("auto", "token", "rounds")),
+    "switch_after_rounds": FieldSchema(
+        field_type=FieldType.INT, required=False, min_value=0
+    ),
+    "switch_strategy": FieldSchema(
+        field_type=FieldType.STR,
+        required=False,
+        valid_values=("auto", "token", "rounds"),
+    ),
     "max_tokens": FieldSchema(field_type=FieldType.INT, required=False, min_value=1),
-    "token_threshold": FieldSchema(field_type=FieldType.FLOAT, required=False, min_value=0.0, max_value=1.0),
+    "token_threshold": FieldSchema(
+        field_type=FieldType.FLOAT, required=False, min_value=0.0, max_value=1.0
+    ),
     "working_dir": FieldSchema(field_type=FieldType.STR, required=False),
 }
 
@@ -590,7 +738,9 @@ DISPLAY_SCHEMA: dict[str, FieldSchema] = {
 }
 
 PROMPTS_SCHEMA: FieldSchema = FieldSchema(field_type=FieldType.LIST, required=False)
-SUMMARY_PROMPT_SCHEMA: FieldSchema = FieldSchema(field_type=FieldType.STR, required=False)
+SUMMARY_PROMPT_SCHEMA: FieldSchema = FieldSchema(
+    field_type=FieldType.STR, required=False
+)
 
 SECTION_SCHEMAS: dict[str, dict[str, FieldSchema]] = {
     "task": TASK_SCHEMA,
@@ -643,7 +793,9 @@ def _load_yaml_mapping_from_text(content: str, *, source: str) -> dict[str, Any]
     if raw is None:
         return {}
     if not isinstance(raw, dict):
-        raise ConfigError(f"Config file must contain a YAML mapping, got {type(raw).__name__}")
+        raise ConfigError(
+            f"Config file must contain a YAML mapping, got {type(raw).__name__}"
+        )
     return raw
 
 
@@ -718,55 +870,69 @@ class ConfigLoader:
         errors: list[ValidationError] = []
 
         if not isinstance(raw, dict):
-            errors.append(ValidationError(
-                field_path="<root>",
-                message="Configuration must be a YAML mapping (dictionary)",
-                severity="error",
-            ))
+            errors.append(
+                ValidationError(
+                    field_path="<root>",
+                    message="Configuration must be a YAML mapping (dictionary)",
+                    severity="error",
+                )
+            )
             return errors
 
         unknown_top_level = raw.keys() - ALL_KNOWN_SECTIONS
         for key in unknown_top_level:
-            errors.append(ValidationError(
-                field_path=key,
-                message=f"Unknown configuration field '{key}' (possible typo?)",
-                severity="warning",
-            ))
+            errors.append(
+                ValidationError(
+                    field_path=key,
+                    message=f"Unknown configuration field '{key}' (possible typo?)",
+                    severity="warning",
+                )
+            )
 
         for section_name, section_schema in SECTION_SCHEMAS.items():
             section_data = raw.get(section_name)
             if section_data is None:
                 required_fields = [
-                    fname for fname, fschema in section_schema.items() if fschema.required
+                    fname
+                    for fname, fschema in section_schema.items()
+                    if fschema.required
                 ]
                 if required_fields:
                     for fname in required_fields:
-                        errors.append(ValidationError(
-                            field_path=f"{section_name}.{fname}",
-                            message=f"Required field '{fname}' is missing from section '{section_name}'",
-                            severity="error",
-                        ))
+                        errors.append(
+                            ValidationError(
+                                field_path=f"{section_name}.{fname}",
+                                message=f"Required field '{fname}' is missing from section '{section_name}'",
+                                severity="error",
+                            )
+                        )
                 continue
 
             if not isinstance(section_data, dict):
-                errors.append(ValidationError(
-                    field_path=section_name,
-                    message=f"Section '{section_name}' must be a mapping",
-                    severity="error",
-                ))
+                errors.append(
+                    ValidationError(
+                        field_path=section_name,
+                        message=f"Section '{section_name}' must be a mapping",
+                        severity="error",
+                    )
+                )
                 continue
 
-            errors.extend(self._validate_section(section_name, section_data, section_schema))
+            errors.extend(
+                self._validate_section(section_name, section_data, section_schema)
+            )
 
         for field_name, field_schema in TOP_LEVEL_FIELDS.items():
             value = raw.get(field_name)
             if value is not None:
                 if not _matches_field_type(value, field_schema.field_type):
-                    errors.append(ValidationError(
-                        field_path=field_name,
-                        message=f"Field '{field_name}' must be of type {field_schema.field_type.value}, got {type(value).__name__}",
-                        severity="error",
-                    ))
+                    errors.append(
+                        ValidationError(
+                            field_path=field_name,
+                            message=f"Field '{field_name}' must be of type {field_schema.field_type.value}, got {type(value).__name__}",
+                            severity="error",
+                        )
+                    )
 
         return errors
 
@@ -782,13 +948,14 @@ class ConfigLoader:
         self,
         validation_errors: list[ValidationError],
     ) -> None:
-        fatal_errors = [error for error in validation_errors if error.severity == "error"]
+        fatal_errors = [
+            error for error in validation_errors if error.severity == "error"
+        ]
         if not fatal_errors:
             return
 
         formatted_errors = [
-            f"{error.field_path}: {error.message}"
-            for error in fatal_errors
+            f"{error.field_path}: {error.message}" for error in fatal_errors
         ]
         for error_message in formatted_errors:
             _config_logger.warning("Config validation error: %s", error_message)
@@ -804,7 +971,12 @@ class ConfigLoader:
         return stat_result.st_mtime_ns, stat_result.st_size
 
     def _coerce_bounded_int(
-        self, raw: dict[str, Any], field_name: str, default: int, minimum: int, warning_prefix: str,
+        self,
+        raw: dict[str, Any],
+        field_name: str,
+        default: int,
+        minimum: int,
+        warning_prefix: str,
     ) -> int:
         raw_value = raw.get(field_name, default)
         if isinstance(raw_value, bool):
@@ -831,7 +1003,11 @@ class ConfigLoader:
         return normalized
 
     def _coerce_unit_interval_float(
-        self, raw: dict[str, Any], field_name: str, default: float, warning_prefix: str,
+        self,
+        raw: dict[str, Any],
+        field_name: str,
+        default: float,
+        warning_prefix: str,
     ) -> float:
         raw_value = raw.get(field_name, default)
         if isinstance(raw_value, bool):
@@ -850,68 +1026,87 @@ class ConfigLoader:
             return default
         if 0.0 <= normalized <= 1.0:
             return normalized
-        self._warn(f"{warning_prefix} value {raw_value} is out of range [0.0, 1.0], using default {default}")
+        self._warn(
+            f"{warning_prefix} value {raw_value} is out of range [0.0, 1.0], using default {default}"
+        )
         return default
 
     def _read_yaml(self) -> dict[str, Any]:
         try:
             content = self._config_path.read_text(encoding="utf-8")
         except OSError as exc:
-            raise ConfigError(f"Cannot read config file '{self._config_path}': {exc}") from exc
+            raise ConfigError(
+                f"Cannot read config file '{self._config_path}': {exc}"
+            ) from exc
         raw = _load_yaml_mapping_from_text(content, source=str(self._config_path))
         return raw
 
     def _validate_section(
-        self, section_name: str, section_data: dict[str, Any], section_schema: dict[str, Any],
+        self,
+        section_name: str,
+        section_data: dict[str, Any],
+        section_schema: dict[str, Any],
     ) -> list[ValidationError]:
         errors: list[ValidationError] = []
 
         for key in section_data:
             if key not in section_schema:
-                errors.append(ValidationError(
-                    field_path=f"{section_name}.{key}",
-                    message=f"Unknown field '{key}' in section '{section_name}' (possible typo?)",
-                    severity="warning",
-                ))
+                errors.append(
+                    ValidationError(
+                        field_path=f"{section_name}.{key}",
+                        message=f"Unknown field '{key}' in section '{section_name}' (possible typo?)",
+                        severity="warning",
+                    )
+                )
 
         for fname, fschema in section_schema.items():
             value = section_data.get(fname)
             if value is None and fschema.required:
-                errors.append(ValidationError(
-                    field_path=f"{section_name}.{fname}",
-                    message=f"Required field '{fname}' is missing from section '{section_name}'",
-                    severity="error",
-                ))
+                errors.append(
+                    ValidationError(
+                        field_path=f"{section_name}.{fname}",
+                        message=f"Required field '{fname}' is missing from section '{section_name}'",
+                        severity="error",
+                    )
+                )
                 continue
             if value is None:
                 continue
 
             if not _matches_field_type(value, fschema.field_type):
-                errors.append(ValidationError(
-                    field_path=f"{section_name}.{fname}",
-                    message=f"Field '{fname}' must be of type {fschema.field_type.value}, got {type(value).__name__}",
-                    severity="error",
-                ))
+                errors.append(
+                    ValidationError(
+                        field_path=f"{section_name}.{fname}",
+                        message=f"Field '{fname}' must be of type {fschema.field_type.value}, got {type(value).__name__}",
+                        severity="error",
+                    )
+                )
                 continue
 
             if fschema.min_value is not None and value < fschema.min_value:
-                errors.append(ValidationError(
-                    field_path=f"{section_name}.{fname}",
-                    message=f"Field '{fname}' value {value} is below minimum {fschema.min_value}, using default",
-                    severity="warning",
-                ))
+                errors.append(
+                    ValidationError(
+                        field_path=f"{section_name}.{fname}",
+                        message=f"Field '{fname}' value {value} is below minimum {fschema.min_value}, using default",
+                        severity="warning",
+                    )
+                )
             if fschema.max_value is not None and value > fschema.max_value:
-                errors.append(ValidationError(
-                    field_path=f"{section_name}.{fname}",
-                    message=f"Field '{fname}' value {value} is above maximum {fschema.max_value}, using default",
-                    severity="warning",
-                ))
+                errors.append(
+                    ValidationError(
+                        field_path=f"{section_name}.{fname}",
+                        message=f"Field '{fname}' value {value} is above maximum {fschema.max_value}, using default",
+                        severity="warning",
+                    )
+                )
             if fschema.valid_values is not None and value not in fschema.valid_values:
-                errors.append(ValidationError(
-                    field_path=f"{section_name}.{fname}",
-                    message=f"Field '{fname}' value '{value}' is not one of {fschema.valid_values}",
-                    severity="warning",
-                ))
+                errors.append(
+                    ValidationError(
+                        field_path=f"{section_name}.{fname}",
+                        message=f"Field '{fname}' value '{value}' is not one of {fschema.valid_values}",
+                        severity="warning",
+                    )
+                )
 
         return errors
 
@@ -924,15 +1119,21 @@ class ConfigLoader:
         summary_prompt = self._normalize_summary_prompt(raw.get("summary_prompt"))
 
         return AppConfig(
-            task=task, cli=cli, execution=execution,
-            display=display, prompts=prompts, summary_prompt=summary_prompt,
+            task=task,
+            cli=cli,
+            execution=execution,
+            display=display,
+            prompts=prompts,
+            summary_prompt=summary_prompt,
         )
 
     def _normalize_prompts(self, raw_prompts: Any) -> list[str]:
         if not isinstance(raw_prompts, list):
             return list(PROMPTS_DEFAULT)
         string_prompts = [item for item in raw_prompts if isinstance(item, str)]
-        normalized = [normalize_newlines(prompt) for prompt in compact_strings(string_prompts)]
+        normalized = [
+            normalize_newlines(prompt) for prompt in compact_strings(string_prompts)
+        ]
         if normalized:
             return normalized
         return list(PROMPTS_DEFAULT)
@@ -956,7 +1157,9 @@ class ConfigLoader:
         if not isinstance(raw, dict):
             return CLIConfig()
         tool = raw.get("tool", CLI_DEFAULTS["tool"])
-        normalized_tool = tool.strip().lower() if isinstance(tool, str) else CLI_DEFAULTS["tool"]
+        normalized_tool = (
+            tool.strip().lower() if isinstance(tool, str) else CLI_DEFAULTS["tool"]
+        )
         return CLIConfig(
             tool=normalized_tool,
             full_auto=raw.get("full_auto", CLI_DEFAULTS["full_auto"]),
@@ -970,18 +1173,53 @@ class ConfigLoader:
     def _build_execution_config(self, raw: Any) -> ExecutionConfig:
         if not isinstance(raw, dict):
             return ExecutionConfig()
-        delay = self._coerce_bounded_int(raw=raw, field_name="delay", default=EXECUTION_DEFAULTS["delay"], minimum=0, warning_prefix="execution.delay")
-        timeout = self._coerce_bounded_int(raw=raw, field_name="timeout", default=EXECUTION_DEFAULTS["timeout"], minimum=0, warning_prefix="execution.timeout")
-        max_retries = self._coerce_bounded_int(raw=raw, field_name="max_retries", default=EXECUTION_DEFAULTS["max_retries"], minimum=0, warning_prefix="execution.max_retries")
-        max_rounds = self._coerce_bounded_int(raw=raw, field_name="max_rounds", default=EXECUTION_DEFAULTS["max_rounds"], minimum=0, warning_prefix="execution.max_rounds")
-        switch_after_rounds = self._coerce_bounded_int(raw=raw, field_name="switch_after_rounds", default=EXECUTION_DEFAULTS["switch_after_rounds"], minimum=0, warning_prefix="execution.switch_after_rounds")
+        delay = self._coerce_bounded_int(
+            raw=raw,
+            field_name="delay",
+            default=EXECUTION_DEFAULTS["delay"],
+            minimum=0,
+            warning_prefix="execution.delay",
+        )
+        timeout = self._coerce_bounded_int(
+            raw=raw,
+            field_name="timeout",
+            default=EXECUTION_DEFAULTS["timeout"],
+            minimum=0,
+            warning_prefix="execution.timeout",
+        )
+        max_retries = self._coerce_bounded_int(
+            raw=raw,
+            field_name="max_retries",
+            default=EXECUTION_DEFAULTS["max_retries"],
+            minimum=0,
+            warning_prefix="execution.max_retries",
+        )
+        max_rounds = self._coerce_bounded_int(
+            raw=raw,
+            field_name="max_rounds",
+            default=EXECUTION_DEFAULTS["max_rounds"],
+            minimum=0,
+            warning_prefix="execution.max_rounds",
+        )
+        switch_after_rounds = self._coerce_bounded_int(
+            raw=raw,
+            field_name="switch_after_rounds",
+            default=EXECUTION_DEFAULTS["switch_after_rounds"],
+            minimum=0,
+            warning_prefix="execution.switch_after_rounds",
+        )
         max_tokens = self._coerce_bounded_int(
-            raw=raw, field_name="max_tokens",
-            default=EXECUTION_DEFAULTS["max_tokens"], minimum=1, warning_prefix="execution.max_tokens",
+            raw=raw,
+            field_name="max_tokens",
+            default=EXECUTION_DEFAULTS["max_tokens"],
+            minimum=1,
+            warning_prefix="execution.max_tokens",
         )
         token_threshold = self._coerce_unit_interval_float(
-            raw=raw, field_name="token_threshold",
-            default=EXECUTION_DEFAULTS["token_threshold"], warning_prefix="execution.token_threshold",
+            raw=raw,
+            field_name="token_threshold",
+            default=EXECUTION_DEFAULTS["token_threshold"],
+            warning_prefix="execution.token_threshold",
         )
         working_dir = raw.get("working_dir", EXECUTION_DEFAULTS["working_dir"])
         if working_dir is None:
@@ -992,11 +1230,17 @@ class ConfigLoader:
         else:
             working_dir = working_dir.strip()
         return ExecutionConfig(
-            delay=delay, timeout=timeout, max_retries=max_retries,
-            auto_continue_on_error=raw.get("auto_continue_on_error", EXECUTION_DEFAULTS["auto_continue_on_error"]),
+            delay=delay,
+            timeout=timeout,
+            max_retries=max_retries,
+            auto_continue_on_error=raw.get(
+                "auto_continue_on_error", EXECUTION_DEFAULTS["auto_continue_on_error"]
+            ),
             max_rounds=max_rounds,
             switch_after_rounds=switch_after_rounds,
-            switch_strategy=raw.get("switch_strategy", EXECUTION_DEFAULTS["switch_strategy"]),
+            switch_strategy=raw.get(
+                "switch_strategy", EXECUTION_DEFAULTS["switch_strategy"]
+            ),
             max_tokens=max_tokens,
             token_threshold=token_threshold,
             working_dir=working_dir,
@@ -1006,8 +1250,12 @@ class ConfigLoader:
         if not isinstance(raw, dict):
             return DisplayConfig()
         return DisplayConfig(
-            show_session_id=raw.get("show_session_id", DISPLAY_DEFAULTS["show_session_id"]),
-            show_timestamp=raw.get("show_timestamp", DISPLAY_DEFAULTS["show_timestamp"]),
+            show_session_id=raw.get(
+                "show_session_id", DISPLAY_DEFAULTS["show_session_id"]
+            ),
+            show_timestamp=raw.get(
+                "show_timestamp", DISPLAY_DEFAULTS["show_timestamp"]
+            ),
         )
 
 
@@ -1056,6 +1304,58 @@ def _validate_model_name(model: str) -> None:
         )
 
 
+def _ensure_windows_user_path() -> None:
+    """Merge user-level PATH entries for Windows GUI / frozen builds."""
+    if sys.platform != "win32":
+        return
+    try:
+        import winreg
+    except ImportError:
+        return
+
+    path_parts: list[str] = []
+    existing = os.environ.get("PATH", "")
+    if existing:
+        path_parts.append(existing)
+
+    for hive, subkey in (
+        (winreg.HKEY_CURRENT_USER, r"Environment"),
+        (winreg.HKEY_LOCAL_MACHINE, r"SYSTEM\CurrentControlSet\Control\Session Manager\Environment"),
+    ):
+        try:
+            with winreg.OpenKey(hive, subkey) as key:
+                user_path, _ = winreg.QueryValueEx(key, "Path")
+                if user_path:
+                    path_parts.append(user_path)
+        except OSError:
+            continue
+
+    appdata = os.environ.get("APPDATA", "")
+    if appdata:
+        path_parts.append(str(Path(appdata) / "npm"))
+
+    merged: list[str] = []
+    seen: set[str] = set()
+    for part in path_parts:
+        for segment in part.split(os.pathsep):
+            normalized = segment.strip()
+            if not normalized:
+                continue
+            key = normalized.lower()
+            if key in seen:
+                continue
+            seen.add(key)
+            merged.append(normalized)
+
+    os.environ["PATH"] = os.pathsep.join(merged)
+
+
+def _find_cli_tool(name: str) -> Optional[str]:
+    """Resolve a CLI executable after ensuring Windows user PATH is loaded."""
+    _ensure_windows_user_path()
+    return shutil.which(name)
+
+
 class OpenCodeAdapter(CLIAdapter):
     """Adapter for the OpenCode CLI tool."""
 
@@ -1064,11 +1364,13 @@ class OpenCodeAdapter(CLIAdapter):
 
     def __init__(self, config: CLIConfig) -> None:
         self._config = config
-        if shutil.which("opencode") is None:
+        executable = _find_cli_tool("opencode")
+        if executable is None:
             raise CLIAdapterError(
                 "opencode executable not found. "
                 "Please ensure opencode is installed and available in PATH."
             )
+        self._executable = executable
         if config.model is not None:
             _validate_model_name(config.model)
 
@@ -1076,6 +1378,10 @@ class OpenCodeAdapter(CLIAdapter):
         if self._config.model:
             return ["-m", self._config.model]
         return []
+
+    def _stream_flags(self) -> list[str]:
+        """Flags that make headless subprocess runs emit progress on stderr."""
+        return ["--print-logs"]
 
     def _validate_prompt(self, prompt: str) -> None:
         length = len(prompt)
@@ -1088,17 +1394,25 @@ class OpenCodeAdapter(CLIAdapter):
 
     def build_run_command(self, prompt: str) -> list[str]:
         self._validate_prompt(prompt)
-        return ["opencode", "run", *self._model_flags(), prompt]
+        return [self._executable, "run", *self._stream_flags(), *self._model_flags(), prompt]
 
     def build_session_command(self, session_id: str, prompt: str) -> list[str]:
         self._validate_prompt(prompt)
-        return ["opencode", "run", "-s", session_id, *self._model_flags(), prompt]
+        return [
+            self._executable,
+            "run",
+            *self._stream_flags(),
+            "-s",
+            session_id,
+            *self._model_flags(),
+            prompt,
+        ]
 
     def build_export_command(self, session_id: str) -> Optional[list[str]]:
-        return ["opencode", "export", session_id]
+        return [self._executable, "export", session_id]
 
     def build_stats_command(self) -> list[str]:
-        return ["opencode", "stats"]
+        return [self._executable, "stats"]
 
     @property
     def supports_token_stats(self) -> bool:
@@ -1311,7 +1625,8 @@ def terminate_process(process: subprocess.Popen[Any]) -> None:
     except subprocess.TimeoutExpired:
         _platform_logger.warning(
             "terminate_process: process %d did not exit within %d seconds, sending kill signal",
-            process.pid, _TERMINATE_TIMEOUT_SECONDS,
+            process.pid,
+            _TERMINATE_TIMEOUT_SECONDS,
         )
         try:
             process.kill()
@@ -1358,10 +1673,13 @@ def init_ansi_colors() -> None:
     if not IS_WINDOWS:
         return
     if _try_enable_virtual_terminal():
-        _platform_logger.debug("Windows Virtual Terminal Processing enabled successfully")
+        _platform_logger.debug(
+            "Windows Virtual Terminal Processing enabled successfully"
+        )
         return
     try:
         import colorama  # type: ignore[import-untyped]
+
         colorama.init()
         _platform_logger.debug("Windows ANSI colors initialized via colorama fallback")
     except ImportError:
@@ -1410,9 +1728,15 @@ class Executor:
         start_time = time.monotonic()
         validation_error = self._validate_invocation(command, timeout, max_retries)
         if validation_error is not None:
-            return self._build_immediate_failure(start_time=start_time, exception_type="ValueError", message=validation_error)
+            return self._build_immediate_failure(
+                start_time=start_time,
+                exception_type="ValueError",
+                message=validation_error,
+            )
 
-        sanitization_failure = self._sanitize_prompt(start_time, prompt, command, "run_with_retry")
+        sanitization_failure = self._sanitize_prompt(
+            start_time, prompt, command, "run_with_retry"
+        )
         if sanitization_failure is not None:
             return sanitization_failure
 
@@ -1429,11 +1753,13 @@ class Executor:
 
                 try:
                     if on_output_line is not None:
-                        return_code, last_stdout, last_stderr = self._execute_once_streaming(
-                            resolved_command,
-                            attempt_timeout,
-                            stdin_input=stdin_bytes,
-                            on_output_line=on_output_line,
+                        return_code, last_stdout, last_stderr = (
+                            self._execute_once_streaming(
+                                resolved_command,
+                                attempt_timeout,
+                                stdin_input=stdin_bytes,
+                                on_output_line=on_output_line,
+                            )
                         )
                         result = subprocess.CompletedProcess(
                             args=resolved_command,
@@ -1443,8 +1769,10 @@ class Executor:
                         )
                     else:
                         result = self._execute_once(
-                            command=resolved_command, timeout=attempt_timeout,
-                            stdin_input=stdin_bytes, temp_files=temp_files,
+                            command=resolved_command,
+                            timeout=attempt_timeout,
+                            stdin_input=stdin_bytes,
+                            temp_files=temp_files,
                         )
                     last_stdout = self._decode_output(result.stdout)
                     last_stderr = self._decode_output(result.stderr)
@@ -1461,46 +1789,62 @@ class Executor:
                         )
 
                     error = RetryError(
-                        attempt=attempt + 1, timestamp=utc_now_iso(),
+                        attempt=attempt + 1,
+                        timestamp=utc_now_iso(),
                         return_code=result.returncode,
                         message=f"Command exited with code {result.returncode}",
                     )
                     errors.append(error)
                     _executor_logger.warning(
                         "run_with_retry: attempt %d/%d failed, return_code=%d, command=%s",
-                        attempt + 1, max_retries + 1, result.returncode, command,
+                        attempt + 1,
+                        max_retries + 1,
+                        result.returncode,
+                        command,
                     )
 
                 except subprocess.TimeoutExpired:
                     error = RetryError(
-                        attempt=attempt + 1, timestamp=utc_now_iso(),
+                        attempt=attempt + 1,
+                        timestamp=utc_now_iso(),
                         exception_type="TimeoutExpired",
                         message=f"Command timed out after {attempt_timeout}s",
                     )
                     errors.append(error)
                     _executor_logger.warning(
                         "run_with_retry: attempt %d/%d timed out, timeout=%ds, command=%s",
-                        attempt + 1, max_retries + 1, attempt_timeout, command,
+                        attempt + 1,
+                        max_retries + 1,
+                        attempt_timeout,
+                        command,
                     )
 
                 except OSError as exc:
                     error = RetryError(
-                        attempt=attempt + 1, timestamp=utc_now_iso(),
-                        exception_type=type(exc).__name__, message=str(exc),
+                        attempt=attempt + 1,
+                        timestamp=utc_now_iso(),
+                        exception_type=type(exc).__name__,
+                        message=str(exc),
                     )
                     errors.append(error)
                     _executor_logger.error(
                         "run_with_retry: attempt %d/%d raised %s: %s, command=%s",
-                        attempt + 1, max_retries + 1, type(exc).__name__, exc, command,
+                        attempt + 1,
+                        max_retries + 1,
+                        type(exc).__name__,
+                        exc,
+                        command,
                     )
 
                 if attempt < max_retries:
-                    backoff_wait = min(2 ** attempt, _MAX_BACKOFF_SECONDS)
+                    backoff_wait = min(2**attempt, _MAX_BACKOFF_SECONDS)
                     time.sleep(min(backoff_wait, 10))
 
             duration = time.monotonic() - start_time
             final_return_code = (
-                errors[-1].return_code if errors and errors[-1].return_code is not None else -1
+                errors[-1].return_code
+                if errors and errors[-1].return_code is not None
+                else -1
             )
             return ExecutionResult(
                 success=False,
@@ -1525,7 +1869,7 @@ class Executor:
         on_output_line: Optional[Callable[[str], None]] = None,
     ) -> ExecutionResult:
         """Execute a command using Popen for stdin pipe support.
-        
+
         When capture_output=False (default), stdout/stderr are inherited from
         the terminal so the user sees real-time output from the subprocess.
         When on_output_line is set, output is streamed to the callback instead.
@@ -1534,9 +1878,15 @@ class Executor:
         start_time = time.monotonic()
         validation_error = self._validate_invocation(command, timeout, 0)
         if validation_error is not None:
-            return self._build_immediate_failure(start_time=start_time, exception_type="ValueError", message=validation_error)
+            return self._build_immediate_failure(
+                start_time=start_time,
+                exception_type="ValueError",
+                message=validation_error,
+            )
 
-        sanitization_failure = self._sanitize_prompt(start_time, prompt, command, "run_with_popen")
+        sanitization_failure = self._sanitize_prompt(
+            start_time, prompt, command, "run_with_popen"
+        )
         if sanitization_failure is not None:
             return sanitization_failure
 
@@ -1546,17 +1896,29 @@ class Executor:
         try:
             if on_output_line is not None:
                 try:
-                    return_code, stdout_text, stderr_text = self._execute_once_streaming(
-                        self._resolve_command(command),
-                        timeout,
-                        stdin_input=stdin_bytes,
-                        on_output_line=on_output_line,
+                    return_code, stdout_text, stderr_text = (
+                        self._execute_once_streaming(
+                            self._resolve_command(command),
+                            timeout,
+                            stdin_input=stdin_bytes,
+                            on_output_line=on_output_line,
+                        )
                     )
                 except subprocess.TimeoutExpired:
                     duration = time.monotonic() - start_time
                     return ExecutionResult(
-                        success=False, return_code=-1, duration_seconds=duration, retry_count=0,
-                        errors=[RetryError(attempt=1, timestamp=utc_now_iso(), exception_type="TimeoutExpired", message=f"Command timed out after {timeout}s")],
+                        success=False,
+                        return_code=-1,
+                        duration_seconds=duration,
+                        retry_count=0,
+                        errors=[
+                            RetryError(
+                                attempt=1,
+                                timestamp=utc_now_iso(),
+                                exception_type="TimeoutExpired",
+                                message=f"Command timed out after {timeout}s",
+                            )
+                        ],
                     )
                 duration = time.monotonic() - start_time
                 return ExecutionResult(
@@ -1565,8 +1927,16 @@ class Executor:
                     duration_seconds=duration,
                     retry_count=0,
                     errors=(
-                        [] if return_code == 0
-                        else [RetryError(attempt=1, timestamp=utc_now_iso(), return_code=return_code, message=f"Command exited with code {return_code}")]
+                        []
+                        if return_code == 0
+                        else [
+                            RetryError(
+                                attempt=1,
+                                timestamp=utc_now_iso(),
+                                return_code=return_code,
+                                message=f"Command exited with code {return_code}",
+                            )
+                        ]
                     ),
                     stdout_text=stdout_text,
                     stderr_text=stderr_text,
@@ -1585,7 +1955,9 @@ class Executor:
                     creationflags=get_creation_flags(),
                 )
                 if capture_output:
-                    stdout_data, stderr_data = process.communicate(input=stdin_bytes, timeout=timeout)
+                    stdout_data, stderr_data = process.communicate(
+                        input=stdin_bytes, timeout=timeout
+                    )
                 else:
                     # Write stdin then wait — output goes directly to terminal
                     if stdin_bytes and process.stdin:
@@ -1596,11 +1968,22 @@ class Executor:
                 duration = time.monotonic() - start_time
                 return ExecutionResult(
                     success=process.returncode == 0,
-                    return_code=process.returncode if process.returncode is not None else -1,
-                    duration_seconds=duration, retry_count=0,
+                    return_code=process.returncode
+                    if process.returncode is not None
+                    else -1,
+                    duration_seconds=duration,
+                    retry_count=0,
                     errors=(
-                        [] if process.returncode == 0
-                        else [RetryError(attempt=1, timestamp=utc_now_iso(), return_code=process.returncode, message=f"Command exited with code {process.returncode}")]
+                        []
+                        if process.returncode == 0
+                        else [
+                            RetryError(
+                                attempt=1,
+                                timestamp=utc_now_iso(),
+                                return_code=process.returncode,
+                                message=f"Command exited with code {process.returncode}",
+                            )
+                        ]
                     ),
                     stdout_text=self._decode_output(stdout_data),
                     stderr_text=self._decode_output(stderr_data),
@@ -1611,16 +1994,41 @@ class Executor:
                     terminate_process(process)
                 duration = time.monotonic() - start_time
                 return ExecutionResult(
-                    success=False, return_code=-1, duration_seconds=duration, retry_count=0,
-                    errors=[RetryError(attempt=1, timestamp=utc_now_iso(), exception_type="TimeoutExpired", message=f"Command timed out after {timeout}s")],
+                    success=False,
+                    return_code=-1,
+                    duration_seconds=duration,
+                    retry_count=0,
+                    errors=[
+                        RetryError(
+                            attempt=1,
+                            timestamp=utc_now_iso(),
+                            exception_type="TimeoutExpired",
+                            message=f"Command timed out after {timeout}s",
+                        )
+                    ],
                 )
 
             except OSError as exc:
-                _executor_logger.error("run_with_popen: %s: %s, command=%s", type(exc).__name__, exc, command)
+                _executor_logger.error(
+                    "run_with_popen: %s: %s, command=%s",
+                    type(exc).__name__,
+                    exc,
+                    command,
+                )
                 duration = time.monotonic() - start_time
                 return ExecutionResult(
-                    success=False, return_code=-1, duration_seconds=duration, retry_count=0,
-                    errors=[RetryError(attempt=1, timestamp=utc_now_iso(), exception_type=type(exc).__name__, message=str(exc))],
+                    success=False,
+                    return_code=-1,
+                    duration_seconds=duration,
+                    retry_count=0,
+                    errors=[
+                        RetryError(
+                            attempt=1,
+                            timestamp=utc_now_iso(),
+                            exception_type=type(exc).__name__,
+                            message=str(exc),
+                        )
+                    ],
                 )
 
         finally:
@@ -1628,7 +2036,9 @@ class Executor:
 
     # --- Private helpers ---
 
-    def _validate_invocation(self, command: list[str], timeout: int, max_retries: int) -> Optional[str]:
+    def _validate_invocation(
+        self, command: list[str], timeout: int, max_retries: int
+    ) -> Optional[str]:
         if not command:
             return "command must not be empty"
         if timeout < 0:
@@ -1637,36 +2047,76 @@ class Executor:
             return "max_retries must be non-negative"
         return None
 
-    def _sanitize_prompt(self, start_time: float, prompt: Optional[str], command: list[str], operation: str) -> Optional[ExecutionResult]:
+    def _sanitize_prompt(
+        self,
+        start_time: float,
+        prompt: Optional[str],
+        command: list[str],
+        operation: str,
+    ) -> Optional[ExecutionResult]:
         if prompt is None:
             return None
         sanitize_result = self._sanitizer.sanitize(prompt)
         if sanitize_result.is_safe:
             return None
-        _executor_logger.warning("%s: prompt rejected by sanitizer, reason=%s, command=%s", operation, sanitize_result.rejection_reason, command)
-        return self._build_immediate_failure(start_time=start_time, exception_type="SanitizationError", message=sanitize_result.rejection_reason)
+        _executor_logger.warning(
+            "%s: prompt rejected by sanitizer, reason=%s, command=%s",
+            operation,
+            sanitize_result.rejection_reason,
+            command,
+        )
+        return self._build_immediate_failure(
+            start_time=start_time,
+            exception_type="SanitizationError",
+            message=sanitize_result.rejection_reason,
+        )
 
-    def _build_immediate_failure(self, start_time: float, exception_type: str, message: str) -> ExecutionResult:
+    def _build_immediate_failure(
+        self, start_time: float, exception_type: str, message: str
+    ) -> ExecutionResult:
         duration = time.monotonic() - start_time
         return ExecutionResult(
-            success=False, return_code=-1, duration_seconds=duration, retry_count=0,
-            errors=[RetryError(attempt=0, timestamp=utc_now_iso(), exception_type=exception_type, message=message)],
+            success=False,
+            return_code=-1,
+            duration_seconds=duration,
+            retry_count=0,
+            errors=[
+                RetryError(
+                    attempt=0,
+                    timestamp=utc_now_iso(),
+                    exception_type=exception_type,
+                    message=message,
+                )
+            ],
         )
 
     @staticmethod
     def _resolve_command(command: list[str]) -> list[str]:
         if not command:
             return command
-        if IS_WINDOWS:
-            resolved = shutil.which(command[0])
-            if resolved is not None:
-                return [resolved] + command[1:]
+        first = command[0]
+        if Path(first).is_file():
+            return command
+        resolved = _find_cli_tool(first)
+        if resolved is not None:
+            return [resolved] + command[1:]
         return command
 
-    def _execute_once(self, command: list[str], timeout: int, stdin_input: Optional[bytes] = None, temp_files: Optional[list[Path]] = None) -> subprocess.CompletedProcess[bytes]:
+    def _execute_once(
+        self,
+        command: list[str],
+        timeout: int,
+        stdin_input: Optional[bytes] = None,
+        temp_files: Optional[list[Path]] = None,
+    ) -> subprocess.CompletedProcess[bytes]:
         return subprocess.run(
-            command, input=stdin_input, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-            shell=False, timeout=timeout, cwd=self._subprocess_cwd(),
+            command,
+            input=stdin_input,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            shell=False,
+            timeout=timeout,
+            cwd=self._subprocess_cwd(),
             creationflags=get_creation_flags(),
         )
 
@@ -1697,7 +2147,11 @@ class Executor:
                     line = pipe.readline()
                     if not line:
                         break
-                    text = self._decode_output(line) if isinstance(line, (bytes, bytearray)) else str(line)
+                    text = (
+                        self._decode_output(line)
+                        if isinstance(line, (bytes, bytearray))
+                        else str(line)
+                    )
                     chunks.append(text)
                     stripped = text.rstrip("\r\n")
                     if stripped:
@@ -1714,7 +2168,9 @@ class Executor:
             readers.append(thread)
         if process.stderr is not None:
             thread = threading.Thread(
-                target=_reader, args=(process.stderr, stderr_chunks, "[stderr] "), daemon=True
+                target=_reader,
+                args=(process.stderr, stderr_chunks, "[stderr] "),
+                daemon=True,
             )
             thread.start()
             readers.append(thread)
@@ -1732,7 +2188,11 @@ class Executor:
         for thread in readers:
             thread.join(timeout=1.0)
 
-        return process.returncode if process.returncode is not None else -1, "".join(stdout_chunks), "".join(stderr_chunks)
+        return (
+            process.returncode if process.returncode is not None else -1,
+            "".join(stdout_chunks),
+            "".join(stderr_chunks),
+        )
 
     @staticmethod
     def _decode_output(output: Optional[bytes]) -> str:
@@ -1741,7 +2201,7 @@ class Executor:
         return output.decode("utf-8", errors="replace")
 
     def _calculate_backoff_timeout(self, base_timeout: int, attempt: int) -> int:
-        backoff_timeout: int = base_timeout * (2 ** attempt)
+        backoff_timeout: int = base_timeout * (2**attempt)
         return min(backoff_timeout, _MAX_BACKOFF_SECONDS)
 
     def _cleanup_temp_files(self, temp_files: list[Path]) -> None:
@@ -1755,7 +2215,12 @@ class Executor:
         except FileNotFoundError:
             pass
         except OSError as exc:
-            _executor_logger.debug("_safe_delete: failed to delete %s: %s: %s", path, type(exc).__name__, exc)
+            _executor_logger.debug(
+                "_safe_delete: failed to delete %s: %s: %s",
+                path,
+                type(exc).__name__,
+                exc,
+            )
 
 
 # =============================================================================
@@ -1772,7 +2237,9 @@ _MESSAGE_CHAR_LIMIT: int = 500
 class SessionManager:
     """Manages session lifecycle: creation, switching, context passing."""
 
-    def __init__(self, adapter: CLIAdapter, executor: Executor, config: AppConfig) -> None:
+    def __init__(
+        self, adapter: CLIAdapter, executor: Executor, config: AppConfig
+    ) -> None:
         self._adapter = adapter
         self._executor = executor
         self._config = config
@@ -1790,7 +2257,12 @@ class SessionManager:
     def reset_rounds(self) -> None:
         self._round_count = 0
 
-    def update_runtime(self, *, adapter: Optional[CLIAdapter] = None, config: Optional[AppConfig] = None) -> None:
+    def update_runtime(
+        self,
+        *,
+        adapter: Optional[CLIAdapter] = None,
+        config: Optional[AppConfig] = None,
+    ) -> None:
         """Update runtime dependencies without discarding session state."""
         if adapter is not None:
             self._adapter = adapter
@@ -1808,7 +2280,9 @@ class SessionManager:
         if self._original_session_id is None:
             self._original_session_id = current_session_id
 
-        _session_logger.info("switch_session: initiating session switch from %s", current_session_id)
+        _session_logger.info(
+            "switch_session: initiating session switch from %s", current_session_id
+        )
 
         summary_context = self._execute_summary(current_session_id)
         exported_context = self._export_context(current_session_id)
@@ -1816,7 +2290,9 @@ class SessionManager:
         new_session_id = self._create_new_session(current_session_id, context)
 
         self.reset_rounds()
-        _session_logger.info("switch_session: switched from %s to %s", current_session_id, new_session_id)
+        _session_logger.info(
+            "switch_session: switched from %s to %s", current_session_id, new_session_id
+        )
         return new_session_id
 
     # --- Private helpers ---
@@ -1841,10 +2317,14 @@ class SessionManager:
         if stats_command is None:
             return self._check_rounds_threshold()
 
-        result = self._executor.run_with_retry(command=stats_command, timeout=30, max_retries=1)
+        result = self._executor.run_with_retry(
+            command=stats_command, timeout=30, max_retries=1
+        )
 
         if not result.success:
-            _session_logger.warning("_check_token_threshold: stats query failed for session %s", session_id)
+            _session_logger.warning(
+                "_check_token_threshold: stats query failed for session %s", session_id
+            )
             return self._check_rounds_threshold()
 
         token_ratio = self._parse_token_usage(result)
@@ -1857,7 +2337,8 @@ class SessionManager:
         if should_switch:
             _session_logger.info(
                 "_check_token_threshold: token usage %.1f%% exceeds threshold %.1f%%",
-                token_ratio * 100, threshold * 100,
+                token_ratio * 100,
+                threshold * 100,
             )
         return should_switch
 
@@ -1869,7 +2350,8 @@ class SessionManager:
         if should_switch:
             _session_logger.info(
                 "_check_rounds_threshold: round count %d reached switch_after_rounds %d",
-                self._round_count, switch_after,
+                self._round_count,
+                switch_after,
             )
         return should_switch
 
@@ -1890,7 +2372,10 @@ class SessionManager:
         try:
             command = self._adapter.build_session_command(session_id, summary_prompt)
             result = self._executor.run_with_retry(
-                command=command, timeout=self._config.execution.timeout, max_retries=1, prompt=summary_prompt,
+                command=command,
+                timeout=self._config.execution.timeout,
+                max_retries=1,
+                prompt=summary_prompt,
             )
             if result.success:
                 summary_text = normalize_newlines(result.stdout_text).strip()
@@ -1901,10 +2386,19 @@ class SessionManager:
                     session_id,
                 )
                 return summary_prompt
-            _session_logger.warning("_execute_summary: failed for session %s, return_code=%d", session_id, result.return_code)
+            _session_logger.warning(
+                "_execute_summary: failed for session %s, return_code=%d",
+                session_id,
+                result.return_code,
+            )
             return ""
         except (OSError, ValueError) as exc:
-            _session_logger.warning("_execute_summary: %s: %s, session_id=%s", type(exc).__name__, exc, session_id)
+            _session_logger.warning(
+                "_execute_summary: %s: %s, session_id=%s",
+                type(exc).__name__,
+                exc,
+                session_id,
+            )
             return ""
 
     def _export_context(self, session_id: str) -> list[str]:
@@ -1912,21 +2406,34 @@ class SessionManager:
         if export_command is None:
             return []
         try:
-            result = self._executor.run_with_retry(command=export_command, timeout=_SESSION_CREATION_TIMEOUT, max_retries=1)
+            result = self._executor.run_with_retry(
+                command=export_command, timeout=_SESSION_CREATION_TIMEOUT, max_retries=1
+            )
             if not result.success:
                 return []
-            return compact_strings(normalize_newlines(result.stdout_text).splitlines())[:_MAX_EXPORT_MESSAGES]
+            return compact_strings(normalize_newlines(result.stdout_text).splitlines())[
+                :_MAX_EXPORT_MESSAGES
+            ]
         except (OSError, ValueError) as exc:
-            _session_logger.warning("_export_context: %s: %s, session_id=%s", type(exc).__name__, exc, session_id)
+            _session_logger.warning(
+                "_export_context: %s: %s, session_id=%s",
+                type(exc).__name__,
+                exc,
+                session_id,
+            )
             return []
 
     def _build_context(self, summary: str, messages: list[str]) -> str:
         context_parts: list[str] = []
         normalized_summary = normalize_newlines(summary).strip()
-        normalized_messages = [normalize_newlines(message) for message in compact_strings(messages)]
+        normalized_messages = [
+            normalize_newlines(message) for message in compact_strings(messages)
+        ]
 
         if normalized_summary:
-            context_parts.append(f"Summary: {truncate_text(normalized_summary, _MESSAGE_CHAR_LIMIT, suffix='')}")
+            context_parts.append(
+                f"Summary: {truncate_text(normalized_summary, _MESSAGE_CHAR_LIMIT, suffix='')}"
+            )
 
         truncated_messages = [
             truncate_text(msg, _MESSAGE_CHAR_LIMIT, suffix="")
@@ -1944,16 +2451,28 @@ class SessionManager:
             new_session_prompt = self._get_new_session_prompt(context)
             command = self._adapter.build_run_command(new_session_prompt)
             result = self._executor.run_with_retry(
-                command=command, timeout=_SESSION_CREATION_TIMEOUT, max_retries=1, prompt=new_session_prompt,
+                command=command,
+                timeout=_SESSION_CREATION_TIMEOUT,
+                max_retries=1,
+                prompt=new_session_prompt,
             )
             elapsed = time.monotonic() - start_time
             if result.success and elapsed <= _SESSION_CREATION_TIMEOUT:
                 new_id = self._generate_session_id(current_session_id)
-                _session_logger.info("_create_new_session: auto-created session %s in %.1fs", new_id, elapsed)
+                _session_logger.info(
+                    "_create_new_session: auto-created session %s in %.1fs",
+                    new_id,
+                    elapsed,
+                )
                 return new_id
             return self._generate_fallback_session_id(current_session_id)
         except (OSError, ValueError) as exc:
-            _session_logger.warning("_create_new_session: %s: %s, session_id=%s", type(exc).__name__, exc, current_session_id)
+            _session_logger.warning(
+                "_create_new_session: %s: %s, session_id=%s",
+                type(exc).__name__,
+                exc,
+                current_session_id,
+            )
             return self._generate_fallback_session_id(current_session_id)
 
     def _get_new_session_prompt(self, context: str) -> str:
@@ -1972,8 +2491,13 @@ class SessionManager:
         self._session_increment += 1
         base_id = self._original_session_id or current_session_id
         new_id = f"{base_id}_{self._session_increment}"
-        print(f"WARNING: Auto session creation failed. Using manual session ID: {new_id}", file=sys.stderr)
-        _session_logger.warning("_generate_fallback_session_id: using manual ID %s", new_id)
+        print(
+            f"WARNING: Auto session creation failed. Using manual session ID: {new_id}",
+            file=sys.stderr,
+        )
+        _session_logger.warning(
+            "_generate_fallback_session_id: using manual ID %s", new_id
+        )
         return new_id
 
 
@@ -2151,6 +2675,7 @@ def _create_factory_templates(target_dir: Path) -> dict[str, list[str]]:
 def init_config_dir(override: Optional[str] = None) -> Path:
     """Initialize and return the active config directory."""
     global _tasks_config_dir
+    _ensure_windows_user_path()
     if override:
         resolved = Path(override).expanduser()
     elif os.environ.get(_CONFIG_DIR_ENV, "").strip():
@@ -2167,6 +2692,7 @@ def get_tasks_config_dir() -> Path:
     if _tasks_config_dir is None:
         return init_config_dir()
     return _tasks_config_dir
+
 
 _SESSION_ID_PATTERN: re.Pattern[str] = re.compile(
     r"^(ses_.+|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-"
@@ -2297,7 +2823,9 @@ def _sigint_handler(signum: int, frame: Optional[FrameType]) -> None:
     sys.exit(0)
 
 
-def _display_round_info(round_num: int, session_id: str, config: AppConfig, prompt: str) -> None:
+def _display_round_info(
+    round_num: int, session_id: str, config: AppConfig, prompt: str
+) -> None:
     """Display round information to the terminal."""
     try:
         print(f"\n{'-' * 50}")
@@ -2325,7 +2853,9 @@ def _select_prompt(prompts: list[str], prompt_index: int) -> tuple[str, int]:
     return active_prompts[prompt_index % len(active_prompts)], next_index
 
 
-def _build_round_command(adapter: CLIAdapter, round_num: int, session_id: str, prompt: str) -> list[str]:
+def _build_round_command(
+    adapter: CLIAdapter, round_num: int, session_id: str, prompt: str
+) -> list[str]:
     """Build the command for the current round.
 
     Round 1 starts a fresh run, later rounds continue the active session.
@@ -2395,7 +2925,9 @@ def _reload_hot_config(
     try:
         new_config, changed = config_loader.reload()
     except (OSError, ValueError, ConfigError) as exc:
-        message = f"Config reload failed at round {round_num}: {type(exc).__name__}: {exc}"
+        message = (
+            f"Config reload failed at round {round_num}: {type(exc).__name__}: {exc}"
+        )
         app_logger.warning(message)
         if on_reload_failed is not None:
             on_reload_failed(f"⚠️ 設定熱重載失敗: {type(exc).__name__}: {exc}")
@@ -2445,8 +2977,7 @@ def _summarize_config_changes(
         return "no effective field changes"
 
     preview = ", ".join(
-        f"{field}: {truncate_text(repr(old), 40)} -> "
-        f"{truncate_text(repr(new), 40)}"
+        f"{field}: {truncate_text(repr(old), 40)} -> {truncate_text(repr(new), 40)}"
         for field, (old, new) in list(changes.items())[:max_items]
     )
     remaining = len(changes) - max_items
@@ -2521,19 +3052,28 @@ def _run_execution_loop(
             on_reload_failed=hooks.on_reload_failed,
         )
 
-        if active_config.execution.max_rounds > 0 and round_num > active_config.execution.max_rounds:
+        if (
+            active_config.execution.max_rounds > 0
+            and round_num > active_config.execution.max_rounds
+        ):
             hooks.on_max_rounds_reached(active_config.execution.max_rounds)
             break
 
-        current_prompt, prompt_index = _select_prompt(active_config.prompts, prompt_index)
-        hooks.on_round_begin(round_num, active_session_id, active_config, current_prompt)
+        current_prompt, prompt_index = _select_prompt(
+            active_config.prompts, prompt_index
+        )
+        hooks.on_round_begin(
+            round_num, active_session_id, active_config, current_prompt
+        )
 
         active_session_manager.increment_round()
         if active_session_manager.should_switch(active_session_id):
             if hooks.on_session_switch_attempt is not None:
                 hooks.on_session_switch_attempt()
             try:
-                active_session_id = active_session_manager.switch_session(active_session_id)
+                active_session_id = active_session_manager.switch_session(
+                    active_session_id
+                )
                 stats.session_count += 1
                 stats.session_id = active_session_id
                 hooks.on_session_switched(active_session_id)
@@ -2542,7 +3082,9 @@ def _run_execution_loop(
 
         if hooks.on_command_preview is not None:
             hooks.on_command_preview(
-                _build_round_command(active_adapter, round_num, active_session_id, current_prompt)
+                _build_round_command(
+                    active_adapter, round_num, active_session_id, current_prompt
+                )
             )
 
         result = _execute_prompt_round(
@@ -2616,12 +3158,16 @@ def _parse_launch_options(argv: list[str]) -> tuple[list[str], _LaunchOptions]:
         if arg == "--port":
             if index + 1 >= len(argv):
                 raise ConfigError("--port requires a number argument")
-            options.port = safe_int(argv[index + 1], default=8080, minimum=1, maximum=65535)
+            options.port = safe_int(
+                argv[index + 1], default=8080, minimum=1, maximum=65535
+            )
             options.port_explicit = True
             index += 2
             continue
         if arg.startswith("--port="):
-            options.port = safe_int(arg.split("=", 1)[1], default=8080, minimum=1, maximum=65535)
+            options.port = safe_int(
+                arg.split("=", 1)[1], default=8080, minimum=1, maximum=65535
+            )
             options.port_explicit = True
             index += 1
             continue
@@ -2652,7 +3198,9 @@ def main() -> None:
         try:
             positional, options = _parse_launch_options(gui_args)
             if positional:
-                raise ConfigError(f"Unexpected arguments for --gui: {' '.join(positional)}")
+                raise ConfigError(
+                    f"Unexpected arguments for --gui: {' '.join(positional)}"
+                )
             init_config_dir(options.config_dir)
             _start_gui(port=options.port, open_browser=options.open_browser)
         except ConfigError as exc:
@@ -2670,11 +3218,20 @@ def main() -> None:
         _sigint_handler(signal.SIGINT, None)
     except OpenCodeInfinityError as exc:
         print(f"FATAL: {type(exc).__name__}: {exc}", file=sys.stderr)
-        _main_logger.error("main: handled open-code error: %s: %s", type(exc).__name__, exc, exc_info=True)
+        _main_logger.error(
+            "main: handled open-code error: %s: %s",
+            type(exc).__name__,
+            exc,
+            exc_info=True,
+        )
         sys.exit(1)
     except Exception as exc:
-        print(f"FATAL: Unhandled exception: {type(exc).__name__}: {exc}", file=sys.stderr)
-        _main_logger.error("main: unhandled exception: %s: %s", type(exc).__name__, exc, exc_info=True)
+        print(
+            f"FATAL: Unhandled exception: {type(exc).__name__}: {exc}", file=sys.stderr
+        )
+        _main_logger.error(
+            "main: unhandled exception: %s: %s", type(exc).__name__, exc, exc_info=True
+        )
         sys.exit(1)
 
 
@@ -2685,20 +3242,35 @@ def _run(args: Optional[list[str]] = None) -> None:
 
     if len(args) == 0 or len(args) > 2:
         config_dir = get_tasks_config_dir()
-        print("Usage: python opencode_infinity.py <session_id> [config_name]", file=sys.stderr)
+        print(
+            "Usage: python opencode_infinity.py <session_id> [config_name]",
+            file=sys.stderr,
+        )
         print(
             "  session_id: Required when two arguments are supplied; a single non-session argument is treated as config_name.",
             file=sys.stderr,
         )
-        print(f"  config_name: Optional config name or path (searches in '{config_dir}/')", file=sys.stderr)
+        print(
+            f"  config_name: Optional config name or path (searches in '{config_dir}/')",
+            file=sys.stderr,
+        )
         print("\nOptions:", file=sys.stderr)
         print("  --config-dir PATH   Override config directory", file=sys.stderr)
         print("  --gui               Start browser-based web GUI", file=sys.stderr)
         print("  --port PORT         GUI server port (default: 8080)", file=sys.stderr)
-        print("  --no-browser        Do not auto-open browser in --gui mode", file=sys.stderr)
+        print(
+            "  --no-browser        Do not auto-open browser in --gui mode",
+            file=sys.stderr,
+        )
         print("\nExamples:", file=sys.stderr)
-        print("  python opencode_infinity.py ses_docs codex     # 使用 codex.yaml", file=sys.stderr)
-        print("  python opencode_infinity.py ses_abc123 codex   # 指定 session", file=sys.stderr)
+        print(
+            "  python opencode_infinity.py ses_docs codex     # 使用 codex.yaml",
+            file=sys.stderr,
+        )
+        print(
+            "  python opencode_infinity.py ses_abc123 codex   # 指定 session",
+            file=sys.stderr,
+        )
         print("  python opencode_infinity.py --gui", file=sys.stderr)
         sys.exit(1)
 
@@ -2732,7 +3304,9 @@ def _run(args: Optional[list[str]] = None) -> None:
         )
         sys.exit(1)
 
-    app_logger.info("Config loaded: tool=%s, config_path=%s", config.cli.tool, config_path)
+    app_logger.info(
+        "Config loaded: tool=%s, config_path=%s", config.cli.tool, config_path
+    )
 
     try:
         adapter = create_adapter(config.cli.tool, config.cli)
@@ -2783,7 +3357,9 @@ def _run(args: Optional[list[str]] = None) -> None:
         should_stop=lambda: not _state.running,
         on_round_begin=_display_round_info,
         on_round_success=lambda round_num, result: app_logger.info(
-            "Round %d completed successfully (%.1fs)", round_num, result.duration_seconds
+            "Round %d completed successfully (%.1fs)",
+            round_num,
+            result.duration_seconds,
         ),
         on_round_failure=lambda round_num, result: app_logger.warning(
             "Round %d failed: return_code=%d, retries=%d",
@@ -2792,8 +3368,12 @@ def _run(args: Optional[list[str]] = None) -> None:
             result.retry_count,
         ),
         on_session_switched=_on_session_switched,
-        on_session_switch_failed=lambda message: app_logger.warning("Session switch failed: %s", message),
-        on_max_rounds_reached=lambda max_rounds: app_logger.info("Reached max_rounds=%d, stopping", max_rounds),
+        on_session_switch_failed=lambda message: app_logger.warning(
+            "Session switch failed: %s", message
+        ),
+        on_max_rounds_reached=lambda max_rounds: app_logger.info(
+            "Reached max_rounds=%d, stopping", max_rounds
+        ),
         on_abort=lambda reason: app_logger.info("%s, stopping after failure", reason),
         on_iteration_end=_sync_cli_state,
     )
@@ -2858,6 +3438,8 @@ def _gui_log(message: str) -> None:
         except queue.Empty:
             pass
     print(formatted, file=sys.stderr)
+    if getattr(sys, "frozen", False):
+        _desktop_log(formatted)
 
 
 def _gui_run_task(
@@ -2875,7 +3457,9 @@ def _gui_run_task(
 
     try:
         try:
+            _ensure_windows_user_path()
             config_path = _resolve_config_path(config_name)
+            _gui_log(f"📄 讀取設定: {config_path}")
             config_loader = ConfigLoader(config_path)
             config = config_loader.load()
         except (ConfigError, OSError, ValueError) as exc:
@@ -2892,7 +3476,9 @@ def _gui_run_task(
             _gui_log(f"❌ 工作目錄無效: {exc}")
             return
 
-        tool_warning = _self_tool_directory_warning(working_dir) if working_dir else None
+        tool_warning = (
+            _self_tool_directory_warning(working_dir) if working_dir else None
+        )
         if tool_warning:
             _gui_log(f"⚠️ {tool_warning}")
         if working_dir:
@@ -2904,7 +3490,15 @@ def _gui_run_task(
             adapter = create_adapter(config.cli.tool, config.cli)
         except (ValueError, CLIAdapterError) as exc:
             _gui_log(f"❌ CLI 適配器建立失敗: {exc}")
+            if sys.platform == "win32":
+                _gui_log(
+                    "💡 提示：請確認已安裝 opencode（npm i -g opencode-ai），"
+                    "並重新啟動桌面版以載入 PATH。"
+                )
             return
+
+        if isinstance(adapter, OpenCodeAdapter):
+            _gui_log(f"🔧 OpenCode: {adapter._executable}")
 
         executor = Executor(working_dir=working_dir)
         session_manager = SessionManager(adapter, executor, config)
@@ -2917,7 +3511,10 @@ def _gui_run_task(
                 _gui_state["session_id"] = loop_stats.session_id
 
         def _on_gui_round_begin(
-            round_num: int, active_session_id: str, active_config: AppConfig, current_prompt: str
+            round_num: int,
+            active_session_id: str,
+            active_config: AppConfig,
+            current_prompt: str,
         ) -> None:
             with _gui_state_lock:
                 _gui_state["round_count"] = round_num
@@ -2926,6 +3523,7 @@ def _gui_run_task(
                 f"▶ Round {round_num} | Session: {active_session_id} | "
                 f"Prompt: {truncate_text(current_prompt, 60)}"
             )
+            _gui_log("  ⏳ 正在呼叫 AI CLI（首次回應可能需要數分鐘，請稍候）…")
 
         def _on_gui_cli_output(line: str) -> None:
             clean = _strip_ansi(line)
@@ -2945,14 +3543,22 @@ def _gui_run_task(
             on_round_failure=lambda round_num, result: _gui_log(
                 f"  ❌ Round {round_num} 失敗 (code={result.return_code}, retries={result.retry_count})"
             ),
-            on_session_switched=lambda new_session_id: _gui_log(f"✅ 切換到新 Session: {new_session_id}"),
+            on_session_switched=lambda new_session_id: _gui_log(
+                f"✅ 切換到新 Session: {new_session_id}"
+            ),
             on_session_switch_attempt=lambda: _gui_log("🔀 觸發 Session 切換..."),
-            on_session_switch_failed=lambda message: _gui_log(f"⚠️ Session 切換失敗: {message}"),
-            on_max_rounds_reached=lambda max_rounds: _gui_log(f"🏁 已達最大輪次 {max_rounds}，停止執行"),
+            on_session_switch_failed=lambda message: _gui_log(
+                f"⚠️ Session 切換失敗: {message}"
+            ),
+            on_max_rounds_reached=lambda max_rounds: _gui_log(
+                f"🏁 已達最大輪次 {max_rounds}，停止執行"
+            ),
             on_abort=lambda reason: _gui_log(f"⛔ {reason}，停止執行"),
             on_reloaded=lambda summary: _gui_log(f"🔄 設定已熱重載: {summary}"),
             on_reload_failed=_gui_log,
-            on_command_preview=lambda command: _gui_log(f"  執行命令: {' '.join(command[:3])}..."),
+            on_command_preview=lambda command: _gui_log(
+                f"  執行命令: {' '.join(command[:3])}..."
+            ),
             on_cli_output=_on_gui_cli_output,
             on_iteration_end=_sync_gui_state,
             interruptible_delay=True,
@@ -2978,6 +3584,9 @@ def _gui_run_task(
             f"🏁 執行結束 - 輪次: {round_count}, Session: {session_count}, "
             f"耗時: {_format_elapsed_time(elapsed)}"
         )
+    except Exception as exc:
+        _gui_log(f"❌ 執行異常: {type(exc).__name__}: {exc}")
+        _desktop_log(f"gui_run_task error: {type(exc).__name__}: {exc}")
     finally:
         with _gui_state_lock:
             _gui_state["running"] = False
@@ -3034,18 +3643,70 @@ def _register_config_api_routes(app: Any, jsonify: Any, request: Any) -> None:
         if not target.is_file():
             return jsonify({"ok": False, "error": "檔案不存在"}), 404
         try:
+            content = target.read_text(encoding="utf-8")
             working_dir = ""
             try:
                 config = ConfigLoader(target).load()
                 working_dir = config.execution.working_dir
             except (ConfigError, OSError, ValueError):
                 pass
-            return jsonify({"working_dir": working_dir})
+            return jsonify({"content": content, "working_dir": working_dir})
         except OSError as exc:
             return jsonify({"ok": False, "error": f"讀取失敗: {exc}"}), 500
 
+    @app.route("/api/config/save", methods=["POST"])
+    def api_config_save():
+        data = request.get_json(force=True, silent=True) or {}
+        filename = data.get("filename", "").strip()
+        content = data.get("content", "")
+        try:
+            target = _config_file_path(filename)
+        except ConfigError as exc:
+            return jsonify({"ok": False, "error": str(exc)}), 400
+        try:
+            _load_yaml_mapping_from_text(
+                content, source=f"GUI save payload: {filename}"
+            )
+        except ConfigError as exc:
+            return jsonify({"ok": False, "error": f"YAML 格式無效: {exc}"}), 400
+        configs_dir = get_tasks_config_dir()
+        configs_dir.mkdir(parents=True, exist_ok=True)
+        try:
+            target.write_text(content, encoding="utf-8")
+        except OSError as exc:
+            return jsonify({"ok": False, "error": f"寫入失敗: {exc}"}), 500
+        return jsonify({"ok": True, "path": str(target)})
 
-def _register_runtime_api_routes(app: Any, jsonify: Any, request: Any, Response: Any) -> None:
+    @app.route("/api/config/generate-yaml", methods=["POST"])
+    def api_config_generate_yaml():
+        data = request.get_json(force=True, silent=True) or {}
+        try:
+            yaml_str = yaml.dump(
+                data, default_flow_style=False, allow_unicode=True, sort_keys=False
+            )
+            return jsonify({"yaml": yaml_str})
+        except (TypeError, ValueError, yaml.YAMLError) as exc:
+            return jsonify({"yaml": None, "error": str(exc)}), 500
+
+    @app.route("/api/config/parse-yaml", methods=["POST"])
+    def api_config_parse_yaml():
+        data = request.get_json(force=True, silent=True) or {}
+        content = data.get("content", "")
+        try:
+            parsed = _load_yaml_mapping_from_text(content, source="GUI parse payload")
+            keys = list(parsed.keys())
+            if len(keys) == 1 and isinstance(parsed[keys[0]], dict):
+                inner = parsed[keys[0]]
+                if any(k in inner for k in ("task", "cli", "execution", "prompts")):
+                    parsed = inner
+            return jsonify({"config": parsed})
+        except ConfigError as exc:
+            return jsonify({"error": f"YAML 解析失敗: {exc}"}), 400
+
+
+def _register_runtime_api_routes(
+    app: Any, jsonify: Any, request: Any, Response: Any
+) -> None:
     @app.route("/api/start", methods=["POST"])
     def api_start():
         with _gui_state_lock:
@@ -3082,7 +3743,9 @@ def _register_runtime_api_routes(app: Any, jsonify: Any, request: Any, Response:
             _gui_state["running"] = True
             _gui_state["config_name"] = config_name
             _gui_state["session_id"] = session_id
-            _gui_state["working_dir"] = str(resolved_working_dir) if resolved_working_dir else ""
+            _gui_state["working_dir"] = (
+                str(resolved_working_dir) if resolved_working_dir else ""
+            )
             _gui_state["round_count"] = 0
             _gui_state["session_count"] = 1
             _gui_state["start_time"] = time.monotonic()
@@ -3115,7 +3778,9 @@ def _register_runtime_api_routes(app: Any, jsonify: Any, request: Any, Response:
         with _gui_state_lock:
             running = _gui_state["running"]
             start_time = _gui_state["start_time"]
-            elapsed_seconds = time.monotonic() - start_time if start_time > 0 and running else 0.0
+            elapsed_seconds = (
+                time.monotonic() - start_time if start_time > 0 and running else 0.0
+            )
             payload = {
                 "running": running,
                 "round_count": _gui_state["round_count"],
@@ -3138,8 +3803,12 @@ def _register_runtime_api_routes(app: Any, jsonify: Any, request: Any, Response:
                     yield f"data: {msg}\n\n"
                 except queue.Empty:
                     yield ": keepalive\n\n"
-        return Response(generate(), mimetype="text/event-stream",
-                        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
+
+        return Response(
+            generate(),
+            mimetype="text/event-stream",
+            headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+        )
 
 
 def _create_flask_app():
@@ -3182,11 +3851,14 @@ def _wait_for_gui_server(port: int, *, timeout_seconds: float = 10.0) -> None:
                     return
         except (urllib.error.URLError, TimeoutError, OSError):
             time.sleep(0.1)
-    raise ConfigError(f"GUI server did not start on port {port} within {timeout_seconds:.0f}s")
+    raise ConfigError(
+        f"GUI server did not start on port {port} within {timeout_seconds:.0f}s"
+    )
 
 
 def _suppress_werkzeug_logs() -> None:
     import logging as _logging
+
     _logging.getLogger("werkzeug").setLevel(_logging.WARNING)
 
 
@@ -3213,6 +3885,7 @@ def _start_gui(*, port: int = 8080, open_browser: bool = True) -> None:
     _eprint(f"   Config dir: {config_dir}")
 
     if open_browser:
+
         def _open_browser():
             time.sleep(1.5)
             webbrowser.open(f"http://127.0.0.1:{port}")
@@ -3229,7 +3902,9 @@ def _start_desktop(*, port: int = DEFAULT_DESKTOP_PORT) -> None:
     try:
         import webview
     except ImportError:
-        _show_fatal_error("OpenCode Infinity", "pywebview 未安裝。請執行: pip install pywebview")
+        _show_fatal_error(
+            "OpenCode Infinity", "pywebview 未安裝。請執行: pip install pywebview"
+        )
         sys.exit(1)
 
     try:
@@ -3242,7 +3917,9 @@ def _start_desktop(*, port: int = DEFAULT_DESKTOP_PORT) -> None:
         port = _pick_listen_port(port)
         timeout = 30.0 if getattr(sys, "frozen", False) else 10.0
 
-        _desktop_log(f"Starting desktop GUI on http://127.0.0.1:{port} (config: {config_dir})")
+        _desktop_log(
+            f"Starting desktop GUI on http://127.0.0.1:{port} (config: {config_dir})"
+        )
         _eprint("OpenCode Infinity Desktop GUI starting...")
         _eprint(f"   http://127.0.0.1:{port}")
         _eprint(f"   Config dir: {config_dir}")
