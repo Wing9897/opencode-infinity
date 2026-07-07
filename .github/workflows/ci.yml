@@ -1,0 +1,41 @@
+name: CI
+
+on:
+  pull_request:
+    branches: ["main"]
+  push:
+    branches: ["main"]
+    paths-ignore:
+      - "README.md"
+      - "docs/**"
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: |
+            requirements.txt
+            requirements-desktop.txt
+
+      - name: Install dependencies
+        run: python -m pip install --upgrade pip && pip install -r requirements-desktop.txt
+
+      - name: Run smoke tests
+        env:
+          PYTHONUTF8: "1"
+        run: python -m unittest discover -s tests -v
+
+      - name: Verify desktop module import
+        env:
+          PYTHONUTF8: "1"
+        run: python -c "import opencode_infinity; opencode_infinity._configure_stdio_encoding(); print('ok')"

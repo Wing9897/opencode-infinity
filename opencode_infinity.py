@@ -8,6 +8,7 @@ from __future__ import annotations
 # =============================================================================
 # 標準庫 imports
 # =============================================================================
+import socket
 import ctypes
 import json
 import logging
@@ -65,6 +66,77 @@ def normalize_newlines(text: str) -> str:
     if "\r" not in text:
         return text
     return text.replace("\r\n", "\n").replace("\r", "\n")
+
+
+def _configure_stdio_encoding() -> None:
+    """Best-effort UTF-8 stdio on Windows consoles and PyInstaller builds."""
+    if sys.platform != "win32":
+        return
+    for name in ("stdout", "stderr"):
+        stream = getattr(sys, name, None)
+        if stream is None:
+            continue
+        reconfigure = getattr(stream, "reconfigure", None)
+        if callable(reconfigure):
+            try:
+                reconfigure(encoding="utf-8", errors="replace")
+            except Exception:
+                pass
+
+
+def _eprint(*args: object, **kwargs: object) -> None:
+    """Print to stderr without crashing on legacy Windows code pages."""
+    kwargs.setdefault("file", sys.stderr)
+    file = kwargs["file"]
+    text = " ".join(str(arg) for arg in args)
+    try:
+        print(text, **kwargs)
+    except UnicodeEncodeError:
+        encoding = getattr(file, "encoding", None) or "utf-8"
+        safe = text.encode(encoding, errors="replace").decode(encoding, errors="replace")
+        print(safe, **{k: v for k, v in kwargs.items() if k != "file"}, file=file)
+
+
+def _desktop_log_path() -> Path:
+    log_dir = _get_user_config_dir().parent
+    log_dir.mkdir(parents=True, exist_ok=True)
+    return log_dir / "desktop.log"
+
+
+def _desktop_log(message: str) -> None:
+    try:
+        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        with _desktop_log_path().open("a", encoding="utf-8") as handle:
+            handle.write(f"[{timestamp}] {message}\n")
+    except Exception:
+        pass
+
+
+def _show_fatal_error(title: str, message: str) -> None:
+    _desktop_log(f"FATAL {title}: {message}")
+    _eprint(f"ERROR: {message}")
+    if sys.platform == "win32":
+        try:
+            ctypes.windll.user32.MessageBoxW(0, message, title, 0x10)
+        except Exception:
+            pass
+
+
+def _pick_listen_port(preferred: int) -> int:
+    """Return a localhost TCP port that can be bound, preferring the requested one."""
+    candidates = [preferred]
+    for offset in range(1, 32):
+        candidates.append(preferred + offset)
+    for port in candidates:
+        if port < 1 or port > 65535:
+            continue
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+            try:
+                sock.bind(("127.0.0.1", port))
+            except OSError:
+                continue
+            return port
+    raise ConfigError(f"No available local port found near {preferred}")
 
 
 def safe_int(value: object, default: int, minimum: Optional[int] = None, maximum: Optional[int] = None) -> int:
@@ -147,14 +219,6 @@ class CLIConfig:
 
 
 @dataclass(frozen=True)
-class OpenCodeConfig:
-    """OpenCode-specific configuration."""
-    model: str = "default"
-    max_tokens: int = 128000
-    token_threshold: float = 0.7
-
-
-@dataclass(frozen=True)
 class ExecutionConfig:
     """Execution parameters configuration."""
     delay: int = 1
@@ -164,6 +228,8 @@ class ExecutionConfig:
     max_rounds: int = 0  # 0 = unlimited (controls when to STOP)
     switch_after_rounds: int = 0  # 0 = no switch (controls when to SWITCH session)
     switch_strategy: str = "auto"  # auto, token, rounds
+    max_tokens: int = 128000
+    token_threshold: float = 0.7
 
 
 @dataclass(frozen=True)
@@ -179,7 +245,6 @@ class AppConfig:
     """Top-level application configuration combining all sections."""
     task: TaskConfig = field(default_factory=TaskConfig)
     cli: CLIConfig = field(default_factory=CLIConfig)
-    opencode: OpenCodeConfig = field(default_factory=OpenCodeConfig)
     execution: ExecutionConfig = field(default_factory=ExecutionConfig)
     display: DisplayConfig = field(default_factory=DisplayConfig)
     prompts: list[str] = field(default_factory=lambda: ["繼續工作"])
@@ -238,10 +303,6 @@ class CLIAdapterError(OpenCodeInfinityError):
     """CLI adapter initialization or command building errors."""
 
 
-class SessionError(OpenCodeInfinityError):
-    """Session management errors."""
-
-
 # =============================================================================
 # 輸入消毒 (sanitizer)
 # =============================================================================
@@ -282,10 +343,6 @@ class InputSanitizer:
             sanitized_text=sanitized,
             rejection_reason="",
         )
-
-    def is_safe(self, input_text: str) -> bool:
-        """Convenience method to check if input is safe."""
-        return self.sanitize(input_text).is_safe
 
     def _escape_shell_chars(self, text: str) -> str:
         """Escape shell special characters with backslash."""
@@ -446,12 +503,6 @@ CLI_DEFAULTS: dict[str, Any] = {
     "mcp_server": None,
 }
 
-OPENCODE_DEFAULTS: dict[str, Any] = {
-    "model": "default",
-    "max_tokens": 128000,
-    "token_threshold": 0.7,
-}
-
 EXECUTION_DEFAULTS: dict[str, Any] = {
     "delay": 1,
     "timeout": 300,
@@ -460,6 +511,8 @@ EXECUTION_DEFAULTS: dict[str, Any] = {
     "max_rounds": 0,
     "switch_after_rounds": 0,
     "switch_strategy": "auto",
+    "max_tokens": 128000,
+    "token_threshold": 0.7,
 }
 
 DISPLAY_DEFAULTS: dict[str, Any] = {
@@ -493,56 +546,56 @@ class FieldSchema:
     min_value: Optional[float] = None
     max_value: Optional[float] = None
     valid_values: Optional[tuple[str, ...]] = None
-    description: str = ""
 
 
 TASK_SCHEMA: dict[str, FieldSchema] = {
-    "name": FieldSchema(field_type=FieldType.STR, required=False, description="Task display name"),
-    "description": FieldSchema(field_type=FieldType.STR, required=False, description="Task description"),
-    "language": FieldSchema(field_type=FieldType.STR, required=False, description="Output language"),
-    "output_dir": FieldSchema(field_type=FieldType.STR, required=False, description="Output directory path"),
+    "name": FieldSchema(field_type=FieldType.STR, required=False),
+    "description": FieldSchema(field_type=FieldType.STR, required=False),
+    "language": FieldSchema(field_type=FieldType.STR, required=False),
+    "output_dir": FieldSchema(field_type=FieldType.STR, required=False),
 }
 
 CLI_SCHEMA: dict[str, FieldSchema] = {
-    "tool": FieldSchema(field_type=FieldType.STR, required=True, valid_values=("opencode", "claude", "codex", "copilot"), description="CLI tool to use"),
-    "commands": FieldSchema(field_type=FieldType.DICT, required=False, description="Custom command overrides"),
-    "full_auto": FieldSchema(field_type=FieldType.BOOL, required=False, description="Legacy: maps to -a never -s danger-full-access (Codex 0.130+)"),
-    "model": FieldSchema(field_type=FieldType.OPTIONAL_STR, required=False, description="Model name override"),
-    "search": FieldSchema(field_type=FieldType.BOOL, required=False, description="Enable web search (Codex)"),
-    "allowed_tools": FieldSchema(field_type=FieldType.OPTIONAL_STR, required=False, description="Allowed tools parameter (Claude)"),
-    "permission_mode": FieldSchema(field_type=FieldType.OPTIONAL_STR, required=False, description="Permission mode (Claude)"),
-    "mcp_server": FieldSchema(field_type=FieldType.OPTIONAL_STR, required=False, description="MCP server parameter (Copilot)"),
+    "tool": FieldSchema(field_type=FieldType.STR, required=True, valid_values=("opencode", "claude", "codex", "copilot")),
+    "commands": FieldSchema(field_type=FieldType.DICT, required=False),
+    "full_auto": FieldSchema(field_type=FieldType.BOOL, required=False),
+    "model": FieldSchema(field_type=FieldType.OPTIONAL_STR, required=False),
+    "search": FieldSchema(field_type=FieldType.BOOL, required=False),
+    "allowed_tools": FieldSchema(field_type=FieldType.OPTIONAL_STR, required=False),
+    "permission_mode": FieldSchema(field_type=FieldType.OPTIONAL_STR, required=False),
+    "mcp_server": FieldSchema(field_type=FieldType.OPTIONAL_STR, required=False),
 }
 
-OPENCODE_SCHEMA: dict[str, FieldSchema] = {
-    "model": FieldSchema(field_type=FieldType.STR, required=False, description="OpenCode model identifier"),
-    "max_tokens": FieldSchema(field_type=FieldType.INT, required=False, min_value=1, description="Maximum token limit"),
-    "token_threshold": FieldSchema(field_type=FieldType.FLOAT, required=False, min_value=0.0, max_value=1.0, description="Token usage threshold (0.0-1.0)"),
+OPENCODE_LEGACY_SCHEMA: dict[str, FieldSchema] = {
+    "max_tokens": FieldSchema(field_type=FieldType.INT, required=False, min_value=1),
+    "token_threshold": FieldSchema(field_type=FieldType.FLOAT, required=False, min_value=0.0, max_value=1.0),
 }
 
 EXECUTION_SCHEMA: dict[str, FieldSchema] = {
-    "delay": FieldSchema(field_type=FieldType.INT, required=False, min_value=0, description="Delay between rounds in seconds"),
-    "timeout": FieldSchema(field_type=FieldType.INT, required=False, min_value=0, description="Base timeout in seconds"),
-    "max_retries": FieldSchema(field_type=FieldType.INT, required=False, min_value=0, description="Maximum retry attempts"),
-    "auto_continue_on_error": FieldSchema(field_type=FieldType.BOOL, required=False, description="Continue execution on error"),
-    "max_rounds": FieldSchema(field_type=FieldType.INT, required=False, min_value=0, description="Maximum execution rounds (0 = unlimited)"),
-    "switch_after_rounds": FieldSchema(field_type=FieldType.INT, required=False, min_value=0, description="Switch session after N rounds (0 = no switch)"),
-    "switch_strategy": FieldSchema(field_type=FieldType.STR, required=False, valid_values=("auto", "token", "rounds"), description="Session switch strategy"),
+    "delay": FieldSchema(field_type=FieldType.INT, required=False, min_value=0),
+    "timeout": FieldSchema(field_type=FieldType.INT, required=False, min_value=0),
+    "max_retries": FieldSchema(field_type=FieldType.INT, required=False, min_value=0),
+    "auto_continue_on_error": FieldSchema(field_type=FieldType.BOOL, required=False),
+    "max_rounds": FieldSchema(field_type=FieldType.INT, required=False, min_value=0),
+    "switch_after_rounds": FieldSchema(field_type=FieldType.INT, required=False, min_value=0),
+    "switch_strategy": FieldSchema(field_type=FieldType.STR, required=False, valid_values=("auto", "token", "rounds")),
+    "max_tokens": FieldSchema(field_type=FieldType.INT, required=False, min_value=1),
+    "token_threshold": FieldSchema(field_type=FieldType.FLOAT, required=False, min_value=0.0, max_value=1.0),
 }
 
 DISPLAY_SCHEMA: dict[str, FieldSchema] = {
-    "show_session_id": FieldSchema(field_type=FieldType.BOOL, required=False, description="Display session ID in output"),
-    "show_token_usage": FieldSchema(field_type=FieldType.BOOL, required=False, description="Display token usage statistics"),
-    "show_timestamp": FieldSchema(field_type=FieldType.BOOL, required=False, description="Display timestamps in output"),
+    "show_session_id": FieldSchema(field_type=FieldType.BOOL, required=False),
+    "show_token_usage": FieldSchema(field_type=FieldType.BOOL, required=False),
+    "show_timestamp": FieldSchema(field_type=FieldType.BOOL, required=False),
 }
 
-PROMPTS_SCHEMA: FieldSchema = FieldSchema(field_type=FieldType.LIST, required=False, description="List of rotating prompt strings")
-SUMMARY_PROMPT_SCHEMA: FieldSchema = FieldSchema(field_type=FieldType.STR, required=False, description="Summary prompt used at token threshold")
+PROMPTS_SCHEMA: FieldSchema = FieldSchema(field_type=FieldType.LIST, required=False)
+SUMMARY_PROMPT_SCHEMA: FieldSchema = FieldSchema(field_type=FieldType.STR, required=False)
 
 SECTION_SCHEMAS: dict[str, dict[str, FieldSchema]] = {
     "task": TASK_SCHEMA,
     "cli": CLI_SCHEMA,
-    "opencode": OPENCODE_SCHEMA,
+    "opencode": OPENCODE_LEGACY_SCHEMA,
     "execution": EXECUTION_SCHEMA,
     "display": DISPLAY_SCHEMA,
 }
@@ -555,16 +608,6 @@ TOP_LEVEL_FIELDS: dict[str, FieldSchema] = {
 ALL_KNOWN_SECTIONS: frozenset[str] = frozenset(
     list(SECTION_SCHEMAS.keys()) + list(TOP_LEVEL_FIELDS.keys())
 )
-
-FIELD_TYPE_MAP: dict[FieldType, tuple[type, ...]] = {
-    FieldType.STR: (str,),
-    FieldType.INT: (int,),
-    FieldType.FLOAT: (int, float),
-    FieldType.BOOL: (bool,),
-    FieldType.LIST: (list,),
-    FieldType.DICT: (dict,),
-    FieldType.OPTIONAL_STR: (str, type(None)),
-}
 
 
 def _matches_field_type(value: object, field_type: FieldType) -> bool:
@@ -888,21 +931,22 @@ class ConfigLoader:
         return errors
 
     def _build_config(self, raw: dict[str, Any]) -> AppConfig:
-        cli_raw = raw.get("cli", {})
+        cli_raw = self._apply_legacy_opencode_settings(raw.get("cli", {}), raw.get("opencode", {}))
         if isinstance(cli_raw, dict):
             cli_raw = dict(cli_raw)
             cli_raw["commands"] = self._normalize_cli_commands(cli_raw.get("commands", {}))
 
         task = self._build_task_config(raw.get("task", {}))
         cli = self._build_cli_config(cli_raw)
-        opencode = self._build_opencode_config(raw.get("opencode", {}))
-        execution = self._build_execution_config(raw.get("execution", {}))
+        execution = self._build_execution_config(
+            self._merge_token_settings(raw.get("execution", {}), raw.get("opencode", {}))
+        )
         display = self._build_display_config(raw.get("display", {}))
         prompts = self._normalize_prompts(raw.get("prompts"))
         summary_prompt = self._normalize_summary_prompt(raw.get("summary_prompt"))
 
         return AppConfig(
-            task=task, cli=cli, opencode=opencode, execution=execution,
+            task=task, cli=cli, execution=execution,
             display=display, prompts=prompts, summary_prompt=summary_prompt,
         )
 
@@ -963,22 +1007,22 @@ class ConfigLoader:
             mcp_server=raw.get("mcp_server", CLI_DEFAULTS["mcp_server"]),
         )
 
-    def _build_opencode_config(self, raw: Any) -> OpenCodeConfig:
-        if not isinstance(raw, dict):
-            return OpenCodeConfig()
-        token_threshold = self._coerce_unit_interval_float(
-            raw=raw, field_name="token_threshold",
-            default=OPENCODE_DEFAULTS["token_threshold"], warning_prefix="opencode.token_threshold",
-        )
-        max_tokens = self._coerce_bounded_int(
-            raw=raw, field_name="max_tokens",
-            default=OPENCODE_DEFAULTS["max_tokens"], minimum=1, warning_prefix="opencode.max_tokens",
-        )
-        return OpenCodeConfig(
-            model=raw.get("model", OPENCODE_DEFAULTS["model"]),
-            max_tokens=max_tokens,
-            token_threshold=token_threshold,
-        )
+    def _apply_legacy_opencode_settings(self, cli_raw: Any, opencode_raw: Any) -> dict[str, Any]:
+        """Apply legacy opencode.* values onto cli/execution inputs."""
+        merged: dict[str, Any] = dict(cli_raw) if isinstance(cli_raw, dict) else {}
+        if isinstance(opencode_raw, dict) and not merged.get("model") and opencode_raw.get("model"):
+            merged["model"] = opencode_raw["model"]
+        return merged
+
+    def _merge_token_settings(self, execution_raw: Any, opencode_raw: Any) -> dict[str, Any]:
+        """Prefer execution.* token fields; fall back to legacy opencode.* values."""
+        merged: dict[str, Any] = dict(execution_raw) if isinstance(execution_raw, dict) else {}
+        if not isinstance(opencode_raw, dict):
+            return merged
+        for key in ("max_tokens", "token_threshold"):
+            if key not in merged and key in opencode_raw:
+                merged[key] = opencode_raw[key]
+        return merged
 
     def _build_execution_config(self, raw: Any) -> ExecutionConfig:
         if not isinstance(raw, dict):
@@ -988,12 +1032,22 @@ class ConfigLoader:
         max_retries = self._coerce_bounded_int(raw=raw, field_name="max_retries", default=EXECUTION_DEFAULTS["max_retries"], minimum=0, warning_prefix="execution.max_retries")
         max_rounds = self._coerce_bounded_int(raw=raw, field_name="max_rounds", default=EXECUTION_DEFAULTS["max_rounds"], minimum=0, warning_prefix="execution.max_rounds")
         switch_after_rounds = self._coerce_bounded_int(raw=raw, field_name="switch_after_rounds", default=EXECUTION_DEFAULTS["switch_after_rounds"], minimum=0, warning_prefix="execution.switch_after_rounds")
+        max_tokens = self._coerce_bounded_int(
+            raw=raw, field_name="max_tokens",
+            default=EXECUTION_DEFAULTS["max_tokens"], minimum=1, warning_prefix="execution.max_tokens",
+        )
+        token_threshold = self._coerce_unit_interval_float(
+            raw=raw, field_name="token_threshold",
+            default=EXECUTION_DEFAULTS["token_threshold"], warning_prefix="execution.token_threshold",
+        )
         return ExecutionConfig(
             delay=delay, timeout=timeout, max_retries=max_retries,
             auto_continue_on_error=raw.get("auto_continue_on_error", EXECUTION_DEFAULTS["auto_continue_on_error"]),
             max_rounds=max_rounds,
             switch_after_rounds=switch_after_rounds,
             switch_strategy=raw.get("switch_strategy", EXECUTION_DEFAULTS["switch_strategy"]),
+            max_tokens=max_tokens,
+            token_threshold=token_threshold,
         )
 
     def _build_display_config(self, raw: Any) -> DisplayConfig:
@@ -1024,11 +1078,6 @@ class CLIAdapter(ABC):
         """Build command to continue a session with a prompt."""
         ...
 
-    @abstractmethod
-    def build_continue_command(self) -> list[str]:
-        """Build command to continue the most recent session."""
-        ...
-
     def build_export_command(self, session_id: str) -> Optional[list[str]]:
         """Build command to export session data."""
         return None
@@ -1044,18 +1093,38 @@ class CLIAdapter(ABC):
         return self.__class__.__name__
 
 
+_MAX_MODEL_NAME_LENGTH: int = 128
+
+
+def _validate_model_name(model: str) -> None:
+    if not model:
+        raise CLIAdapterError("Model name must not be empty when specified.")
+    if len(model) > _MAX_MODEL_NAME_LENGTH:
+        raise CLIAdapterError(
+            f"Model name exceeds maximum length of {_MAX_MODEL_NAME_LENGTH} characters (got {len(model)})."
+        )
+
+
 class OpenCodeAdapter(CLIAdapter):
     """Adapter for the OpenCode CLI tool."""
 
     _MIN_PROMPT_LENGTH: int = 1
     _MAX_PROMPT_LENGTH: int = 100_000
 
-    def __init__(self) -> None:
+    def __init__(self, config: CLIConfig) -> None:
+        self._config = config
         if shutil.which("opencode") is None:
             raise CLIAdapterError(
                 "opencode executable not found. "
                 "Please ensure opencode is installed and available in PATH."
             )
+        if config.model is not None:
+            _validate_model_name(config.model)
+
+    def _model_flags(self) -> list[str]:
+        if self._config.model:
+            return ["-m", self._config.model]
+        return []
 
     def _validate_prompt(self, prompt: str) -> None:
         length = len(prompt)
@@ -1068,14 +1137,11 @@ class OpenCodeAdapter(CLIAdapter):
 
     def build_run_command(self, prompt: str) -> list[str]:
         self._validate_prompt(prompt)
-        return ["opencode", "run", prompt]
+        return ["opencode", "run", *self._model_flags(), prompt]
 
     def build_session_command(self, session_id: str, prompt: str) -> list[str]:
         self._validate_prompt(prompt)
-        return ["opencode", "run", "-s", session_id, prompt]
-
-    def build_continue_command(self) -> list[str]:
-        return ["opencode", "run", "--continue"]
+        return ["opencode", "run", "-s", session_id, *self._model_flags(), prompt]
 
     def build_export_command(self, session_id: str) -> Optional[list[str]]:
         return ["opencode", "export", session_id]
@@ -1092,9 +1158,6 @@ class OpenCodeAdapter(CLIAdapter):
         return "OpenCode"
 
 
-_MAX_MODEL_NAME_LENGTH: int = 128
-
-
 class CodexAdapter(CLIAdapter):
     """Adapter for the Codex CLI tool (v0.130+, Rust rewrite).
 
@@ -1109,16 +1172,7 @@ class CodexAdapter(CLIAdapter):
     def __init__(self, config: CLIConfig) -> None:
         self._config = config
         if config.model is not None:
-            self._validate_model(config.model)
-
-    @staticmethod
-    def _validate_model(model: str) -> None:
-        if not model:
-            raise CLIAdapterError("Model name must not be empty when specified.")
-        if len(model) > _MAX_MODEL_NAME_LENGTH:
-            raise CLIAdapterError(
-                f"Model name exceeds maximum length of {_MAX_MODEL_NAME_LENGTH} characters (got {len(model)})."
-            )
+            _validate_model_name(config.model)
 
     def _build_exec_flags(self) -> list[str]:
         """Build flags for ``codex exec [PROMPT]``."""
@@ -1156,11 +1210,6 @@ class CodexAdapter(CLIAdapter):
     def build_session_command(self, session_id: str, prompt: str) -> list[str]:
         if not prompt:
             raise CLIAdapterError("Prompt must not be empty")
-        cmd: list[str] = ["codex", "exec", "resume", "--last"]
-        cmd.extend(self._build_resume_flags())
-        return cmd
-
-    def build_continue_command(self) -> list[str]:
         cmd: list[str] = ["codex", "exec", "resume", "--last"]
         cmd.extend(self._build_resume_flags())
         return cmd
@@ -1205,11 +1254,6 @@ class ClaudeAdapter(CLIAdapter):
         cmd: list[str] = ["claude"]
         cmd.extend(self._build_security_params())
         cmd.extend(["-p", prompt])
-        return cmd
-
-    def build_continue_command(self) -> list[str]:
-        cmd: list[str] = ["claude", "--continue"]
-        cmd.extend(self._build_security_params())
         return cmd
 
     def build_session_command(self, session_id: str, prompt: str) -> list[str]:
@@ -1268,12 +1312,6 @@ class CopilotAdapter(CLIAdapter):
         cmd.append(prompt)
         return cmd
 
-    def build_continue_command(self) -> list[str]:
-        cmd = self._build_base_command()
-        cmd.append("run_session")
-        cmd.append("--last")
-        return cmd
-
     @property
     def supports_token_stats(self) -> bool:
         return False
@@ -1287,7 +1325,7 @@ def create_adapter(tool: str, config: CLIConfig) -> CLIAdapter:
     """Factory function to create the appropriate CLI adapter."""
     tool_lower = tool.strip().lower()
     if tool_lower == "opencode":
-        return OpenCodeAdapter()
+        return OpenCodeAdapter(config)
     if tool_lower == "claude":
         return ClaudeAdapter(config)
     if tool_lower == "codex":
@@ -1740,7 +1778,7 @@ class SessionManager:
         if token_ratio is None:
             return self._check_rounds_threshold()
 
-        threshold = self._config.opencode.token_threshold
+        threshold = self._config.execution.token_threshold
         should_switch = token_ratio >= threshold
 
         if should_switch:
@@ -1764,7 +1802,7 @@ class SessionManager:
 
     def _parse_token_usage(self, result: ExecutionResult) -> Optional[float]:
         try:
-            max_tokens = self._config.opencode.max_tokens
+            max_tokens = self._config.execution.max_tokens
             if max_tokens <= 0:
                 return None
             estimated_tokens_per_round = 3000
@@ -1792,7 +1830,7 @@ class SessionManager:
                 return summary_prompt
             _session_logger.warning("_execute_summary: failed for session %s, return_code=%d", session_id, result.return_code)
             return ""
-        except (OSError, SessionError) as exc:
+        except (OSError, ValueError) as exc:
             _session_logger.warning("_execute_summary: %s: %s, session_id=%s", type(exc).__name__, exc, session_id)
             return ""
 
@@ -1805,7 +1843,7 @@ class SessionManager:
             if not result.success:
                 return []
             return compact_strings(normalize_newlines(result.stdout_text).splitlines())[:_MAX_EXPORT_MESSAGES]
-        except (OSError, SessionError) as exc:
+        except (OSError, ValueError) as exc:
             _session_logger.warning("_export_context: %s: %s, session_id=%s", type(exc).__name__, exc, session_id)
             return []
 
@@ -1841,7 +1879,7 @@ class SessionManager:
                 _session_logger.info("_create_new_session: auto-created session %s in %.1fs", new_id, elapsed)
                 return new_id
             return self._generate_fallback_session_id(current_session_id)
-        except (OSError, SessionError) as exc:
+        except (OSError, ValueError) as exc:
             _session_logger.warning("_create_new_session: %s: %s, session_id=%s", type(exc).__name__, exc, current_session_id)
             return self._generate_fallback_session_id(current_session_id)
 
@@ -1870,14 +1908,175 @@ class SessionManager:
 # 主程式邏輯 (__main__)
 # =============================================================================
 
-_TASKS_YAML_DIR: str = "configs"
+_CONFIG_DIR_ENV: str = "OPENCODE_INFINITY_CONFIG_DIR"
+_tasks_config_dir: Optional[Path] = None
+_main_logger: logging.Logger = logging.getLogger("opencode_infinity.__main__")
+
+
+def _app_root() -> Path:
+    """Return the application root directory (supports PyInstaller bundles)."""
+    if getattr(sys, "frozen", False):
+        return Path(getattr(sys, "_MEIPASS", Path(__file__).parent))
+    return Path(__file__).parent
+
+
+def _get_user_config_dir() -> Path:
+    """Return the cross-platform user config directory."""
+    if sys.platform == "win32":
+        base = Path(os.environ.get("APPDATA", Path.home() / "AppData" / "Roaming"))
+    elif sys.platform == "darwin":
+        base = Path.home() / "Library" / "Application Support"
+    else:
+        base = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config"))
+    return base / "OpenCodeInfinity" / "configs"
+
+
+_FACTORY_SEED_CONFIGS: dict[str, str] = {
+    "opencode.yaml": """# OpenCode 出廠範本
+task:
+  name: "通用任務"
+  description: "OpenCode 自動執行 - 可根據需求修改提示詞"
+  language: "繁體中文"
+  output_dir: output
+
+cli:
+  tool: opencode
+
+execution:
+  delay: 1
+  timeout: 300
+  max_retries: 5
+  auto_continue_on_error: true
+  max_rounds: 0
+  switch_after_rounds: 0
+  max_tokens: 128000
+  token_threshold: 0.7
+
+display:
+  show_session_id: true
+  show_token_usage: true
+  show_timestamp: true
+
+prompts:
+  - |
+    生成實用工具函數：
+    - 字符串處理函數
+    - 日期格式化工具
+    - 數據驗證函數
+    - 包含完整的文檔和測試
+  - |
+    優化現有代碼：
+    - 改進代碼結構
+    - 添加錯誤處理
+    - 補充註釋說明
+  - |
+    完善項目文檔：
+    - 更新 README
+    - 添加使用範例
+    - 補充 API 說明
+
+summary_prompt: |
+  請用繁體中文總結本輪工作（300字內）：
+  1. 完成了哪些功能
+  2. 主要改進點
+  3. 下一步建議
+""",
+    "codex.yaml": """# Codex 出廠範本
+task:
+  name: "通用任務"
+  description: "Codex 自動執行 - 可根據需求修改提示詞"
+  language: "繁體中文"
+  output_dir: output
+
+cli:
+  tool: codex
+  search: true
+
+execution:
+  delay: 1
+  timeout: 300
+  max_retries: 5
+  auto_continue_on_error: true
+  max_rounds: 0
+  switch_after_rounds: 0
+  max_tokens: 128000
+  token_threshold: 0.7
+
+display:
+  show_session_id: true
+  show_token_usage: true
+  show_timestamp: true
+
+prompts:
+  - "繼續完成當前任務，並檢查是否有遺漏。"
+  - "優化並修復剛才的改動，補上必要測試。"
+  - "整理輸出與文檔，確保結果可直接使用。"
+
+summary_prompt: "請用繁體中文總結本輪工作（300字內）。"
+""",
+}
+
+
+def _create_factory_templates(target_dir: Path) -> dict[str, list[str]]:
+    """Create built-in templates only when each file is missing."""
+    target_dir.mkdir(parents=True, exist_ok=True)
+    created: list[str] = []
+    skipped: list[str] = []
+    errors: list[str] = []
+    for filename, content in _FACTORY_SEED_CONFIGS.items():
+        target = target_dir / filename
+        if target.is_file():
+            skipped.append(filename)
+            continue
+        try:
+            target.write_text(content, encoding="utf-8")
+            created.append(filename)
+            _main_logger.info("Created factory template: %s", target)
+        except OSError as exc:
+            errors.append(f"{filename}: {exc}")
+    return {"created": created, "skipped": skipped, "errors": errors}
+
+
+def init_config_dir(override: Optional[str] = None) -> Path:
+    """Initialize and return the active config directory."""
+    global _tasks_config_dir
+    if override:
+        resolved = Path(override).expanduser()
+    elif os.environ.get(_CONFIG_DIR_ENV, "").strip():
+        resolved = Path(os.environ[_CONFIG_DIR_ENV]).expanduser()
+    else:
+        resolved = _get_user_config_dir()
+    resolved.mkdir(parents=True, exist_ok=True)
+    _tasks_config_dir = resolved
+    return resolved
+
+
+def get_tasks_config_dir() -> Path:
+    """Return the active config directory, creating it when needed."""
+    if _tasks_config_dir is None:
+        return init_config_dir()
+    return _tasks_config_dir
 
 _SESSION_ID_PATTERN: re.Pattern[str] = re.compile(
     r"^(ses_.+|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-"
     r"[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$"
 )
 
-_main_logger: logging.Logger = logging.getLogger("opencode_infinity.__main__")
+
+def _validate_config_filename(filename: str) -> None:
+    """Reject path traversal and non-YAML config filenames."""
+    name = filename.strip()
+    if not name:
+        raise ConfigError("未指定檔案名稱")
+    if ".." in name or "/" in name or "\\" in name:
+        raise ConfigError("檔案名稱不合法（不允許路徑字元）")
+    if not (name.endswith(".yaml") or name.endswith(".yml")):
+        raise ConfigError("檔案名稱必須以 .yaml 或 .yml 結尾")
+
+
+def _config_file_path(filename: str) -> Path:
+    _validate_config_filename(filename)
+    return get_tasks_config_dir() / filename.strip()
 
 
 def _validate_session_id(session_id: str) -> bool:
@@ -1887,8 +2086,8 @@ def _validate_session_id(session_id: str) -> bool:
 
 def _resolve_config_path(config_name: Optional[str]) -> Path:
     """Resolve the configuration file path from a config name or path."""
+    tasks_dir = get_tasks_config_dir()
     if config_name is None:
-        tasks_dir = Path(_TASKS_YAML_DIR)
         if tasks_dir.is_dir():
             yaml_files = sorted(
                 list(tasks_dir.glob("*.yaml")) + list(tasks_dir.glob("*.yml")),
@@ -1897,14 +2096,13 @@ def _resolve_config_path(config_name: Optional[str]) -> Path:
             if yaml_files:
                 return yaml_files[0]
         raise ConfigError(
-            f"No config file specified and no YAML files found in '{_TASKS_YAML_DIR}/'"
+            f"No config file specified and no YAML files found in '{tasks_dir}/'"
         )
 
     config_path = Path(config_name)
     if config_path.is_file():
         return config_path
 
-    tasks_dir = Path(_TASKS_YAML_DIR)
     for candidate in (
         tasks_dir / f"{config_name}.yaml",
         tasks_dir / config_name,
@@ -1915,7 +2113,7 @@ def _resolve_config_path(config_name: Optional[str]) -> Path:
 
     raise ConfigError(
         f"Config file not found: '{config_name}' "
-        f"(searched in current directory and '{_TASKS_YAML_DIR}/')"
+        f"(searched in '{tasks_dir}/' and direct paths)"
     )
 
 
@@ -2054,6 +2252,17 @@ def _execute_prompt_round(
     )
 
 
+def _interruptible_sleep(seconds: float, should_stop: Callable[[], bool]) -> None:
+    """Sleep in short slices so stop requests can interrupt promptly."""
+    if seconds <= 0:
+        return
+    slices = max(1, int(seconds * 10))
+    for _ in range(slices):
+        if should_stop():
+            return
+        time.sleep(seconds / slices)
+
+
 def _reload_hot_config(
     *,
     round_num: int,
@@ -2062,6 +2271,8 @@ def _reload_hot_config(
     adapter: CLIAdapter,
     session_manager: SessionManager,
     app_logger: logging.Logger,
+    on_reloaded: Optional[Callable[[str], None]] = None,
+    on_reload_failed: Optional[Callable[[str], None]] = None,
 ) -> tuple[AppConfig, CLIAdapter, SessionManager]:
     """Reload config on demand and refresh runtime components if anything changed."""
     if round_num < 2:
@@ -2070,7 +2281,10 @@ def _reload_hot_config(
     try:
         new_config, changed = config_loader.reload()
     except (OSError, ValueError, ConfigError) as exc:
-        app_logger.warning("Config reload failed at round %d: %s: %s", round_num, type(exc).__name__, exc)
+        message = f"Config reload failed at round {round_num}: {type(exc).__name__}: {exc}"
+        app_logger.warning(message)
+        if on_reload_failed is not None:
+            on_reload_failed(f"⚠️ 設定熱重載失敗: {type(exc).__name__}: {exc}")
         return config, adapter, session_manager
 
     if not changed:
@@ -2084,11 +2298,10 @@ def _reload_hot_config(
         previous_config=previous_config,
         new_config=updated_config,
     )
-    app_logger.info(
-        "Config hot-reloaded at round %d: %s",
-        round_num,
-        _summarize_config_changes(previous_config, updated_config),
-    )
+    summary = _summarize_config_changes(previous_config, updated_config)
+    app_logger.info("Config hot-reloaded at round %d: %s", round_num, summary)
+    if on_reloaded is not None:
+        on_reloaded(summary)
     return updated_config, updated_adapter, updated_session_manager
 
 
@@ -2128,17 +2341,224 @@ def _summarize_config_changes(
     return preview
 
 
+@dataclass
+class _ExecutionLoopStats:
+    """Mutable counters collected while running the shared execution loop."""
+
+    round_count: int = 0
+    success_count: int = 0
+    fail_count: int = 0
+    session_count: int = 1
+    session_id: str = ""
+
+
+@dataclass
+class _ExecutionLoopHooks:
+    """Callbacks that let CLI and GUI reuse the same execution loop."""
+
+    should_stop: Callable[[], bool]
+    on_round_begin: Callable[[int, str, AppConfig, str], None]
+    on_round_success: Callable[[int, ExecutionResult], None]
+    on_round_failure: Callable[[int, ExecutionResult], None]
+    on_session_switched: Callable[[str], None]
+    on_session_switch_failed: Callable[[str], None]
+    on_max_rounds_reached: Callable[[int], None]
+    on_reloaded: Optional[Callable[[str], None]] = None
+    on_reload_failed: Optional[Callable[[str], None]] = None
+    on_command_preview: Optional[Callable[[list[str]], None]] = None
+    on_iteration_end: Optional[Callable[[_ExecutionLoopStats], None]] = None
+    on_session_switch_attempt: Optional[Callable[[], None]] = None
+    on_abort: Optional[Callable[[str], None]] = None
+    interruptible_delay: bool = False
+
+
+def _run_execution_loop(
+    *,
+    config_loader: ConfigLoader,
+    config: AppConfig,
+    adapter: CLIAdapter,
+    executor: Executor,
+    session_manager: SessionManager,
+    session_id: str,
+    app_logger: logging.Logger,
+    hooks: _ExecutionLoopHooks,
+) -> tuple[_ExecutionLoopStats, AppConfig, CLIAdapter, SessionManager]:
+    """Run the shared prompt execution loop for CLI and GUI modes."""
+    stats = _ExecutionLoopStats(session_id=session_id)
+    prompt_index = 0
+    active_config = config
+    active_adapter = adapter
+    active_session_manager = session_manager
+    active_session_id = session_id
+
+    while not hooks.should_stop():
+        stats.round_count += 1
+        round_num = stats.round_count
+
+        active_config, active_adapter, active_session_manager = _reload_hot_config(
+            round_num=round_num,
+            config_loader=config_loader,
+            config=active_config,
+            adapter=active_adapter,
+            session_manager=active_session_manager,
+            app_logger=app_logger,
+            on_reloaded=hooks.on_reloaded,
+            on_reload_failed=hooks.on_reload_failed,
+        )
+
+        if active_config.execution.max_rounds > 0 and round_num > active_config.execution.max_rounds:
+            hooks.on_max_rounds_reached(active_config.execution.max_rounds)
+            break
+
+        current_prompt, prompt_index = _select_prompt(active_config.prompts, prompt_index)
+        hooks.on_round_begin(round_num, active_session_id, active_config, current_prompt)
+
+        active_session_manager.increment_round()
+        if active_session_manager.should_switch(active_session_id):
+            if hooks.on_session_switch_attempt is not None:
+                hooks.on_session_switch_attempt()
+            try:
+                active_session_id = active_session_manager.switch_session(active_session_id)
+                stats.session_count += 1
+                stats.session_id = active_session_id
+                hooks.on_session_switched(active_session_id)
+            except (OSError, ValueError) as exc:
+                hooks.on_session_switch_failed(f"{type(exc).__name__}: {exc}")
+
+        if hooks.on_command_preview is not None:
+            hooks.on_command_preview(
+                _build_round_command(active_adapter, round_num, active_session_id, current_prompt)
+            )
+
+        result = _execute_prompt_round(
+            executor=executor,
+            adapter=active_adapter,
+            round_num=round_num,
+            session_id=active_session_id,
+            prompt=current_prompt,
+            timeout=active_config.execution.timeout,
+            max_retries=active_config.execution.max_retries,
+        )
+
+        if result.success:
+            stats.success_count += 1
+            hooks.on_round_success(round_num, result)
+        else:
+            stats.fail_count += 1
+            hooks.on_round_failure(round_num, result)
+            if not active_config.execution.auto_continue_on_error:
+                if hooks.on_abort is not None:
+                    hooks.on_abort("auto_continue_on_error=False")
+                break
+
+        if hooks.on_iteration_end is not None:
+            hooks.on_iteration_end(stats)
+
+        if hooks.should_stop():
+            break
+
+        if active_config.execution.delay > 0:
+            if hooks.interruptible_delay:
+                _interruptible_sleep(active_config.execution.delay, hooks.should_stop)
+            else:
+                time.sleep(active_config.execution.delay)
+
+    stats.session_id = active_session_id
+    return stats, active_config, active_adapter, active_session_manager
+
+
+@dataclass
+class _LaunchOptions:
+    """Parsed optional CLI/GUI launch flags."""
+
+    config_dir: Optional[str] = None
+    port: int = 8080
+    open_browser: bool = True
+    port_explicit: bool = False
+
+
+DEFAULT_DESKTOP_PORT = 19090
+
+
+def _parse_launch_options(argv: list[str]) -> tuple[list[str], _LaunchOptions]:
+    """Extract optional flags and return the remaining positional arguments."""
+    options = _LaunchOptions()
+    positional: list[str] = []
+    index = 0
+    while index < len(argv):
+        arg = argv[index]
+        if arg == "--config-dir":
+            if index + 1 >= len(argv):
+                raise ConfigError("--config-dir requires a path argument")
+            options.config_dir = argv[index + 1]
+            index += 2
+            continue
+        if arg.startswith("--config-dir="):
+            options.config_dir = arg.split("=", 1)[1]
+            index += 1
+            continue
+        if arg == "--port":
+            if index + 1 >= len(argv):
+                raise ConfigError("--port requires a number argument")
+            options.port = safe_int(argv[index + 1], default=8080, minimum=1, maximum=65535)
+            options.port_explicit = True
+            index += 2
+            continue
+        if arg.startswith("--port="):
+            options.port = safe_int(arg.split("=", 1)[1], default=8080, minimum=1, maximum=65535)
+            options.port_explicit = True
+            index += 1
+            continue
+        if arg == "--no-browser":
+            options.open_browser = False
+            index += 1
+            continue
+        if arg.startswith("-"):
+            raise ConfigError(f"Unknown option: {arg}")
+        positional.append(arg)
+        index += 1
+    return positional, options
+
+
 def main() -> None:
     """Main entry point for OpenCode Infinity.
 
-    CLI interface: python opencode-infinity.py <session_id> [config_name]
-    GUI interface: python opencode-infinity.py --gui
+    CLI interface: python opencode_infinity.py <session_id> [config_name]
+    GUI interface: python opencode_infinity.py --gui
+    Desktop GUI: python opencode_infinity.py --desktop
     """
-    if "--gui" in sys.argv:
-        _start_gui()
+    _configure_stdio_encoding()
+    global _main_logger
+    _main_logger = setup_logger("opencode_infinity.__main__")
+    raw_args = sys.argv[1:]
+    if "--desktop" in raw_args:
+        desktop_args = [arg for arg in raw_args if arg != "--desktop"]
+        positional, options = _parse_launch_options(desktop_args)
+        if positional:
+            _show_fatal_error("OpenCode Infinity", f"Unexpected arguments for --desktop: {' '.join(positional)}")
+            sys.exit(1)
+        init_config_dir(options.config_dir)
+        desktop_port = options.port if options.port_explicit else DEFAULT_DESKTOP_PORT
+        _start_desktop(port=desktop_port)
         return
+
+    if "--gui" in raw_args:
+        gui_args = [arg for arg in raw_args if arg != "--gui"]
+        try:
+            positional, options = _parse_launch_options(gui_args)
+            if positional:
+                raise ConfigError(f"Unexpected arguments for --gui: {' '.join(positional)}")
+            init_config_dir(options.config_dir)
+            _start_gui(port=options.port, open_browser=options.open_browser)
+        except ConfigError as exc:
+            print(f"ERROR: {exc}", file=sys.stderr)
+            sys.exit(1)
+        return
+
     try:
-        _run()
+        positional, options = _parse_launch_options(raw_args)
+        init_config_dir(options.config_dir)
+        _run(positional)
     except SystemExit:
         raise
     except KeyboardInterrupt:
@@ -2153,20 +2573,30 @@ def main() -> None:
         sys.exit(1)
 
 
-def _run() -> None:
+def _run(args: Optional[list[str]] = None) -> None:
     """Internal main logic."""
-    args = sys.argv[1:]
+    if args is None:
+        args = sys.argv[1:]
 
     if len(args) == 0 or len(args) > 2:
-        print("Usage: python opencode-infinity.py <session_id> [config_name]", file=sys.stderr)
+        config_dir = get_tasks_config_dir()
+        print("Usage: python opencode_infinity.py <session_id> [config_name]", file=sys.stderr)
         print(
             "  session_id: Required when two arguments are supplied; a single non-session argument is treated as config_name.",
             file=sys.stderr,
         )
-        print(f"  config_name: Optional config name or path (searches in '{_TASKS_YAML_DIR}/')", file=sys.stderr)
+        print(f"  config_name: Optional config name or path (searches in '{config_dir}/')", file=sys.stderr)
+        print("\nOptions:", file=sys.stderr)
+        print("  --config-dir PATH   Override config directory", file=sys.stderr)
+        print("  --gui               Start browser-based web GUI", file=sys.stderr)
+        print("  --desktop           Start pywebview desktop GUI", file=sys.stderr)
+        print("  --port PORT         GUI server port (default: 8080)", file=sys.stderr)
+        print("  --no-browser        Do not auto-open browser in --gui mode", file=sys.stderr)
         print("\nExamples:", file=sys.stderr)
-        print("  python opencode-infinity.py ses_docs codex     # 使用 codex.yaml", file=sys.stderr)
-        print("  python opencode-infinity.py ses_abc123 codex   # 指定 session", file=sys.stderr)
+        print("  python opencode_infinity.py ses_docs codex     # 使用 codex.yaml", file=sys.stderr)
+        print("  python opencode_infinity.py ses_abc123 codex   # 指定 session", file=sys.stderr)
+        print("  python opencode_infinity.py --gui", file=sys.stderr)
+        print("  python opencode_infinity.py --desktop", file=sys.stderr)
         sys.exit(1)
 
     try:
@@ -2219,74 +2649,50 @@ def _run() -> None:
 
     app_logger.info("Starting main loop, tool=%s", adapter.tool_name)
 
-    prompt_index = 0
+    def _sync_cli_state(loop_stats: _ExecutionLoopStats) -> None:
+        _state.round_count = loop_stats.round_count
+        _state.success_count = loop_stats.success_count
+        _state.fail_count = loop_stats.fail_count
+        _state.session_count = loop_stats.session_count
+        _state.current_session_id = loop_stats.session_id
 
-    while _state.running:
-        _state.round_count += 1
-        round_num = _state.round_count
+    def _on_session_switched(new_session_id: str) -> None:
+        nonlocal session_id
+        session_id = new_session_id
+        _state.current_session_id = new_session_id
+        app_logger.info("Switched to new session: %s", new_session_id)
 
-        config, adapter, session_manager = _reload_hot_config(
-            round_num=round_num,
-            config_loader=config_loader,
-            config=config,
-            adapter=adapter,
-            session_manager=session_manager,
-            app_logger=app_logger,
-        )
+    hooks = _ExecutionLoopHooks(
+        should_stop=lambda: not _state.running,
+        on_round_begin=_display_round_info,
+        on_round_success=lambda round_num, result: app_logger.info(
+            "Round %d completed successfully (%.1fs)", round_num, result.duration_seconds
+        ),
+        on_round_failure=lambda round_num, result: app_logger.warning(
+            "Round %d failed: return_code=%d, retries=%d",
+            round_num,
+            result.return_code,
+            result.retry_count,
+        ),
+        on_session_switched=_on_session_switched,
+        on_session_switch_failed=lambda message: app_logger.warning("Session switch failed: %s", message),
+        on_max_rounds_reached=lambda max_rounds: app_logger.info("Reached max_rounds=%d, stopping", max_rounds),
+        on_abort=lambda reason: app_logger.info("%s, stopping after failure", reason),
+        on_iteration_end=_sync_cli_state,
+    )
 
-        if config.execution.max_rounds > 0:
-            if round_num > config.execution.max_rounds:
-                app_logger.info("Reached max_rounds=%d, stopping", config.execution.max_rounds)
-                break
-
-        current_prompt, prompt_index = _select_prompt(config.prompts, prompt_index)
-
-        _display_round_info(round_num, session_id, config, current_prompt)
-
-        session_manager.increment_round()
-        if session_manager.should_switch(session_id):
-            app_logger.info("Session switch triggered at round %d", round_num)
-            try:
-                new_session_id = session_manager.switch_session(session_id)
-                session_id = new_session_id
-                _state.current_session_id = session_id
-                _state.session_count += 1
-                app_logger.info("Switched to new session: %s", session_id)
-            except (OSError, SessionError, ValueError) as exc:
-                app_logger.warning("Session switch failed: %s: %s", type(exc).__name__, exc)
-
-        use_stdin_pipe = _supports_stdin_pipe(adapter)
-
-        if round_num == 1:
-            command = adapter.build_run_command(current_prompt)
-        else:
-            command = adapter.build_session_command(session_id, current_prompt)
-
-        app_logger.debug("Executing command for round %d: %s", round_num, command)
-
-        if use_stdin_pipe:
-            result = executor.run_with_popen(
-                command=command, timeout=config.execution.timeout,
-                stdin_input=current_prompt, prompt=current_prompt,
-            )
-        else:
-            result = executor.run_with_retry(
-                command=command, timeout=config.execution.timeout,
-                max_retries=config.execution.max_retries, prompt=current_prompt,
-            )
-
-        if result.success:
-            _state.success_count += 1
-            app_logger.info("Round %d completed successfully (%.1fs)", round_num, result.duration_seconds)
-        else:
-            _state.fail_count += 1
-            app_logger.warning("Round %d failed: return_code=%d, retries=%d", round_num, result.return_code, result.retry_count)
-            if not config.execution.auto_continue_on_error:
-                app_logger.info("auto_continue_on_error=False, stopping after failure")
-                break
-
-        if _state.running and config.execution.delay > 0:
-            time.sleep(config.execution.delay)
+    stats, _, _, _ = _run_execution_loop(
+        config_loader=config_loader,
+        config=config,
+        adapter=adapter,
+        executor=executor,
+        session_manager=session_manager,
+        session_id=session_id,
+        app_logger=app_logger,
+        hooks=hooks,
+    )
+    _sync_cli_state(stats)
+    session_id = stats.session_id
 
     elapsed = time.monotonic() - _state.start_time
     elapsed_str = _format_elapsed_time(elapsed)
@@ -2308,6 +2714,7 @@ def _run() -> None:
 # =============================================================================
 
 _gui_log_queue: queue.Queue[str] = queue.Queue(maxsize=10000)
+_gui_state_lock = threading.Lock()
 _gui_state: dict[str, Any] = {
     "running": False,
     "round_count": 0,
@@ -2317,7 +2724,6 @@ _gui_state: dict[str, Any] = {
     "session_id": "",
     "thread": None,
     "stop_event": None,
-    "process": None,
 }
 
 
@@ -2339,246 +2745,163 @@ def _gui_log(message: str) -> None:
 def _gui_run_task(config_name: str, session_id: str, stop_event: threading.Event) -> None:
     """Background thread: run the execution loop with GUI logging."""
     _gui_log(f"🚀 啟動執行 - Config: {config_name}, Session: {session_id}")
-    _gui_state["round_count"] = 0
-    _gui_state["session_count"] = 1
-    _gui_state["start_time"] = time.monotonic()
+    with _gui_state_lock:
+        _gui_state["round_count"] = 0
+        _gui_state["session_count"] = 1
+        _gui_state["start_time"] = time.monotonic()
 
     try:
-        config_path = _resolve_config_path(config_name)
-        config_loader = ConfigLoader(config_path)
-        config = config_loader.load()
-    except (ConfigError, OSError, ValueError) as exc:
-        _gui_log(f"❌ 設定載入失敗: {exc}")
-        _gui_state["running"] = False
-        return
+        try:
+            config_path = _resolve_config_path(config_name)
+            config_loader = ConfigLoader(config_path)
+            config = config_loader.load()
+        except (ConfigError, OSError, ValueError) as exc:
+            _gui_log(f"❌ 設定載入失敗: {exc}")
+            return
 
-    _gui_log(f"✅ 設定載入成功: tool={config.cli.tool}")
+        _gui_log(f"✅ 設定載入成功: tool={config.cli.tool}")
 
-    try:
-        adapter = create_adapter(config.cli.tool, config.cli)
-    except (ValueError, CLIAdapterError) as exc:
-        _gui_log(f"❌ CLI 適配器建立失敗: {exc}")
-        _gui_state["running"] = False
-        return
+        try:
+            adapter = create_adapter(config.cli.tool, config.cli)
+        except (ValueError, CLIAdapterError) as exc:
+            _gui_log(f"❌ CLI 適配器建立失敗: {exc}")
+            return
 
-    executor = Executor()
-    session_manager = SessionManager(adapter, executor, config)
-    prompt_index = 0
+        executor = Executor()
+        session_manager = SessionManager(adapter, executor, config)
+        loop_logger = logging.getLogger("opencode_infinity.gui_loop")
 
-    while not stop_event.is_set():
-        _gui_state["round_count"] += 1
-        round_num = _gui_state["round_count"]
+        def _sync_gui_state(loop_stats: _ExecutionLoopStats) -> None:
+            with _gui_state_lock:
+                _gui_state["round_count"] = loop_stats.round_count
+                _gui_state["session_count"] = loop_stats.session_count
+                _gui_state["session_id"] = loop_stats.session_id
 
-        if config.execution.max_rounds > 0 and round_num > config.execution.max_rounds:
-            _gui_log(f"🏁 已達最大輪次 {config.execution.max_rounds}，停止執行")
-            break
-
-        # Hot-reload config
-        if round_num >= 2:
-            try:
-                new_config, changed = config_loader.reload()
-                if changed:
-                    previous_config = config
-                    config = new_config
-                    adapter, session_manager = _refresh_runtime_components(
-                        session_manager=session_manager, adapter=adapter,
-                        previous_config=previous_config, new_config=config,
-                    )
-                    _gui_log(
-                        f"🔄 設定已熱重載: {_summarize_config_changes(previous_config, new_config)}"
-                    )
-            except (ConfigError, OSError, ValueError) as exc:
-                _gui_log(f"⚠️ 設定熱重載失敗: {type(exc).__name__}: {exc}")
-
-        current_prompt, prompt_index = _select_prompt(config.prompts, prompt_index)
-
-        _gui_log(f"▶ Round {round_num} | Session: {session_id} | Prompt: {truncate_text(current_prompt, 60)}")
-
-        session_manager.increment_round()
-        if session_manager.should_switch(session_id):
-            _gui_log("🔀 觸發 Session 切換...")
-            try:
-                new_session_id = session_manager.switch_session(session_id)
-                session_id = new_session_id
-                _gui_state["session_count"] += 1
-                _gui_state["session_id"] = session_id
-                _gui_log(f"✅ 切換到新 Session: {session_id}")
-            except (OSError, SessionError, ValueError) as exc:
-                _gui_log(f"⚠️ Session 切換失敗: {exc}")
-
-        use_stdin_pipe = _supports_stdin_pipe(adapter)
-
-        if round_num == 1:
-            command = adapter.build_run_command(current_prompt)
-        else:
-            command = adapter.build_session_command(session_id, current_prompt)
-
-        _gui_log(f"  執行命令: {' '.join(command[:3])}...")
-
-        if use_stdin_pipe:
-            result = executor.run_with_popen(
-                command=command, timeout=config.execution.timeout,
-                stdin_input=current_prompt, prompt=current_prompt,
-            )
-        else:
-            result = executor.run_with_retry(
-                command=command, timeout=config.execution.timeout,
-                max_retries=config.execution.max_retries, prompt=current_prompt,
+        def _on_gui_round_begin(
+            round_num: int, active_session_id: str, active_config: AppConfig, current_prompt: str
+        ) -> None:
+            _gui_log(
+                f"▶ Round {round_num} | Session: {active_session_id} | "
+                f"Prompt: {truncate_text(current_prompt, 60)}"
             )
 
-        if result.success:
-            _gui_log(f"  ✅ Round {round_num} 完成 ({result.duration_seconds:.1f}s)")
-        else:
-            _gui_log(f"  ❌ Round {round_num} 失敗 (code={result.return_code}, retries={result.retry_count})")
-            if not config.execution.auto_continue_on_error:
-                _gui_log("⛔ auto_continue_on_error=False，停止執行")
-                break
+        hooks = _ExecutionLoopHooks(
+            should_stop=stop_event.is_set,
+            on_round_begin=_on_gui_round_begin,
+            on_round_success=lambda round_num, result: _gui_log(
+                f"  ✅ Round {round_num} 完成 ({result.duration_seconds:.1f}s)"
+            ),
+            on_round_failure=lambda round_num, result: _gui_log(
+                f"  ❌ Round {round_num} 失敗 (code={result.return_code}, retries={result.retry_count})"
+            ),
+            on_session_switched=lambda new_session_id: _gui_log(f"✅ 切換到新 Session: {new_session_id}"),
+            on_session_switch_attempt=lambda: _gui_log("🔀 觸發 Session 切換..."),
+            on_session_switch_failed=lambda message: _gui_log(f"⚠️ Session 切換失敗: {message}"),
+            on_max_rounds_reached=lambda max_rounds: _gui_log(f"🏁 已達最大輪次 {max_rounds}，停止執行"),
+            on_abort=lambda reason: _gui_log(f"⛔ {reason}，停止執行"),
+            on_reloaded=lambda summary: _gui_log(f"🔄 設定已熱重載: {summary}"),
+            on_reload_failed=_gui_log,
+            on_command_preview=lambda command: _gui_log(f"  執行命令: {' '.join(command[:3])}..."),
+            on_iteration_end=_sync_gui_state,
+            interruptible_delay=True,
+        )
 
-        if stop_event.is_set():
-            break
+        stats, _, _, _ = _run_execution_loop(
+            config_loader=config_loader,
+            config=config,
+            adapter=adapter,
+            executor=executor,
+            session_manager=session_manager,
+            session_id=session_id,
+            app_logger=loop_logger,
+            hooks=hooks,
+        )
+        _sync_gui_state(stats)
 
-        if config.execution.delay > 0:
-            for _ in range(config.execution.delay * 10):
-                if stop_event.is_set():
-                    break
-                time.sleep(0.1)
+        with _gui_state_lock:
+            elapsed = time.monotonic() - _gui_state["start_time"]
+            round_count = _gui_state["round_count"]
+            session_count = _gui_state["session_count"]
+        _gui_log(
+            f"🏁 執行結束 - 輪次: {round_count}, Session: {session_count}, "
+            f"耗時: {_format_elapsed_time(elapsed)}"
+        )
+    finally:
+        with _gui_state_lock:
+            _gui_state["running"] = False
 
-    elapsed = time.monotonic() - _gui_state["start_time"]
-    _gui_log(f"🏁 執行結束 - 輪次: {_gui_state['round_count']}, Session: {_gui_state['session_count']}, 耗時: {_format_elapsed_time(elapsed)}")
-    _gui_state["running"] = False
+
+def _gui_asset_mimetype(filename: str) -> str:
+    if filename.endswith(".css"):
+        return "text/css"
+    if filename.endswith(".js"):
+        return "application/javascript"
+    return "application/octet-stream"
 
 
-def _start_gui() -> None:
-    """Start the Flask web GUI server."""
-    try:
-        from flask import Flask, Response, jsonify, request
-    except ImportError:
-        print("ERROR: Flask 未安裝。請執行: pip install flask", file=sys.stderr)
-        sys.exit(1)
-
-    app = Flask(__name__)
-    app.config['JSON_AS_ASCII'] = False
-
+def _register_gui_static_routes(app: Any, Response: Any) -> None:
     @app.route("/")
     def index():
-        gui_path = Path(__file__).parent / "gui" / "index.html"
+        gui_path = _app_root() / "gui" / "index.html"
         if not gui_path.is_file():
             return "ERROR: gui/index.html not found", 404
         return Response(gui_path.read_text(encoding="utf-8"), mimetype="text/html")
 
+    @app.route("/gui/<path:filename>")
+    def gui_assets(filename: str):
+        if ".." in filename or filename.startswith("/"):
+            return "Invalid path", 400
+        asset_path = _app_root() / "gui" / filename
+        if not asset_path.is_file():
+            return "Asset not found", 404
+        return Response(asset_path.read_bytes(), mimetype=_gui_asset_mimetype(filename))
+
+
+def _register_config_api_routes(app: Any, jsonify: Any, request: Any) -> None:
     @app.route("/api/configs")
     def api_configs():
-        configs_dir = Path(_TASKS_YAML_DIR)
-        configs: list[str] = []
-        if configs_dir.is_dir():
-            for f in sorted(configs_dir.iterdir()):
-                if f.suffix in (".yaml", ".yml"):
-                    configs.append(f.name)
+        configs_dir = get_tasks_config_dir()
+        if not configs_dir.is_dir():
+            return jsonify({"configs": []})
+        configs = sorted(
+            f.name for f in configs_dir.iterdir() if f.suffix in (".yaml", ".yml")
+        )
         return jsonify({"configs": configs})
+
+    @app.route("/api/config/create-templates", methods=["POST"])
+    def api_config_create_templates():
+        result = _create_factory_templates(get_tasks_config_dir())
+        return jsonify({"ok": not result["errors"], **result})
 
     @app.route("/api/config/<name>")
     def api_config_content(name: str):
-        configs_dir = Path(_TASKS_YAML_DIR)
-        target = configs_dir / name
+        try:
+            target = _config_file_path(name)
+        except ConfigError as exc:
+            return jsonify({"ok": False, "error": str(exc)}), 400
         if not target.is_file():
-            return jsonify({"content": "檔案不存在"}), 404
+            return jsonify({"ok": False, "error": "檔案不存在"}), 404
         try:
             content = target.read_text(encoding="utf-8")
             return jsonify({"content": content})
         except OSError as exc:
-            return jsonify({"content": f"讀取失敗: {exc}"}), 500
-
-    @app.route("/api/start", methods=["POST"])
-    def api_start():
-        if _gui_state["running"]:
-            return jsonify({"ok": False, "error": "已在執行中"})
-        data = request.get_json(force=True, silent=True) or {}
-        config_name = data.get("config", "")
-        session_id = data.get("session_id", "").strip()
-        if not config_name:
-            return jsonify({"ok": False, "error": "未指定設定檔"})
-        if not session_id:
-            session_id = f"ses_{int(time.time())}"
-
-        _gui_state["running"] = True
-        _gui_state["config_name"] = config_name
-        _gui_state["session_id"] = session_id
-        _gui_state["round_count"] = 0
-        _gui_state["session_count"] = 1
-
-        stop_event = threading.Event()
-        _gui_state["stop_event"] = stop_event
-
-        t = threading.Thread(
-            target=_gui_run_task,
-            args=(config_name, session_id, stop_event),
-            daemon=True,
-        )
-        _gui_state["thread"] = t
-        t.start()
-
-        return jsonify({"ok": True, "session_id": session_id})
-
-    @app.route("/api/stop", methods=["POST"])
-    def api_stop():
-        if not _gui_state["running"]:
-            return jsonify({"ok": False, "error": "目前未在執行"})
-        stop_event = _gui_state.get("stop_event")
-        if stop_event:
-            stop_event.set()
-        _gui_state["running"] = False
-        _gui_log("⏹ 使用者請求停止")
-        return jsonify({"ok": True})
-
-    @app.route("/api/status")
-    def api_status():
-        elapsed_seconds = 0.0
-        if _gui_state["start_time"] > 0 and _gui_state["running"]:
-            elapsed_seconds = time.monotonic() - _gui_state["start_time"]
-        minutes = int(elapsed_seconds) // 60
-        seconds = int(elapsed_seconds) % 60
-        elapsed_str = f"{minutes}:{seconds:02d}"
-        return jsonify({
-            "running": _gui_state["running"],
-            "round_count": _gui_state["round_count"],
-            "session_count": _gui_state["session_count"],
-            "elapsed": elapsed_str,
-            "config_name": _gui_state["config_name"],
-            "session_id": _gui_state["session_id"],
-        })
-
-    @app.route("/api/logs")
-    def api_logs():
-        def generate():
-            while True:
-                try:
-                    msg = _gui_log_queue.get(timeout=15)
-                    yield f"data: {msg}\n\n"
-                except queue.Empty:
-                    yield ": keepalive\n\n"
-        return Response(generate(), mimetype="text/event-stream",
-                        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
+            return jsonify({"ok": False, "error": f"讀取失敗: {exc}"}), 500
 
     @app.route("/api/config/save", methods=["POST"])
     def api_config_save():
         data = request.get_json(force=True, silent=True) or {}
         filename = data.get("filename", "").strip()
         content = data.get("content", "")
-        if not filename:
-            return jsonify({"ok": False, "error": "未指定檔案名稱"}), 400
-        # Security: reject path traversal
-        if ".." in filename or "/" in filename or "\\" in filename:
-            return jsonify({"ok": False, "error": "檔案名稱不合法（不允許路徑字元）"}), 400
-        if not (filename.endswith(".yaml") or filename.endswith(".yml")):
-            return jsonify({"ok": False, "error": "檔案名稱必須以 .yaml 或 .yml 結尾"}), 400
-        # Validate it's valid YAML
+        try:
+            target = _config_file_path(filename)
+        except ConfigError as exc:
+            return jsonify({"ok": False, "error": str(exc)}), 400
         try:
             _load_yaml_mapping_from_text(content, source=f"GUI save payload: {filename}")
         except ConfigError as exc:
             return jsonify({"ok": False, "error": f"YAML 格式無效: {exc}"}), 400
-        configs_dir = Path(_TASKS_YAML_DIR)
+        configs_dir = get_tasks_config_dir()
         configs_dir.mkdir(parents=True, exist_ok=True)
-        target = configs_dir / filename
         try:
             target.write_text(content, encoding="utf-8")
         except OSError as exc:
@@ -2600,10 +2923,8 @@ def _start_gui() -> None:
         content = data.get("content", "")
         try:
             parsed = _load_yaml_mapping_from_text(content, source="GUI parse payload")
-            # If top-level has a single key wrapping the config, unwrap it
             keys = list(parsed.keys())
             if len(keys) == 1 and isinstance(parsed[keys[0]], dict):
-                # Check if it looks like a named config (has nested task/cli/execution)
                 inner = parsed[keys[0]]
                 if any(k in inner for k in ("task", "cli", "execution", "prompts")):
                     parsed = inner
@@ -2611,22 +2932,213 @@ def _start_gui() -> None:
         except ConfigError as exc:
             return jsonify({"error": f"YAML 解析失敗: {exc}"}), 400
 
-    port = 8080
-    print(f"🌐 OpenCode Infinity Web GUI 啟動中...", file=sys.stderr)
-    print(f"   http://localhost:{port}", file=sys.stderr)
 
-    # Open browser after a short delay
-    def _open_browser():
-        time.sleep(1.5)
-        webbrowser.open(f"http://localhost:{port}")
+def _register_runtime_api_routes(app: Any, jsonify: Any, request: Any, Response: Any) -> None:
+    @app.route("/api/start", methods=["POST"])
+    def api_start():
+        with _gui_state_lock:
+            if _gui_state["running"]:
+                return jsonify({"ok": False, "error": "已在執行中"}), 409
+        data = request.get_json(force=True, silent=True) or {}
+        config_name = data.get("config", "")
+        session_id = data.get("session_id", "").strip()
+        if not config_name:
+            return jsonify({"ok": False, "error": "未指定設定檔"}), 400
+        if session_id and not _validate_session_id(session_id):
+            return jsonify({"ok": False, "error": "session_id 格式不正確"}), 400
+        try:
+            config_path = _resolve_config_path(config_name)
+        except ConfigError as exc:
+            return jsonify({"ok": False, "error": str(exc)}), 400
+        if not config_path.is_file():
+            return jsonify({"ok": False, "error": f"找不到設定檔: {config_name}"}), 404
+        if not session_id:
+            session_id = f"ses_{int(time.time())}"
 
-    threading.Thread(target=_open_browser, daemon=True).start()
+        stop_event = threading.Event()
+        with _gui_state_lock:
+            if _gui_state["running"]:
+                return jsonify({"ok": False, "error": "已在執行中"}), 409
+            _gui_state["running"] = True
+            _gui_state["config_name"] = config_name
+            _gui_state["session_id"] = session_id
+            _gui_state["round_count"] = 0
+            _gui_state["session_count"] = 1
+            _gui_state["stop_event"] = stop_event
 
-    # Suppress Flask's default banner for cleaner output
+        t = threading.Thread(
+            target=_gui_run_task,
+            args=(config_name, session_id, stop_event),
+            daemon=True,
+        )
+        with _gui_state_lock:
+            _gui_state["thread"] = t
+        t.start()
+
+        return jsonify({"ok": True, "session_id": session_id})
+
+    @app.route("/api/stop", methods=["POST"])
+    def api_stop():
+        with _gui_state_lock:
+            if not _gui_state["running"]:
+                return jsonify({"ok": False, "error": "目前未在執行"}), 409
+            stop_event = _gui_state.get("stop_event")
+        if stop_event:
+            stop_event.set()
+        _gui_log("⏹ 使用者請求停止")
+        return jsonify({"ok": True})
+
+    @app.route("/api/status")
+    def api_status():
+        with _gui_state_lock:
+            running = _gui_state["running"]
+            start_time = _gui_state["start_time"]
+            elapsed_seconds = time.monotonic() - start_time if start_time > 0 and running else 0.0
+            payload = {
+                "running": running,
+                "round_count": _gui_state["round_count"],
+                "session_count": _gui_state["session_count"],
+                "config_name": _gui_state["config_name"],
+                "session_id": _gui_state["session_id"],
+            }
+        minutes = int(elapsed_seconds) // 60
+        seconds = int(elapsed_seconds) % 60
+        payload["elapsed"] = f"{minutes}:{seconds:02d}"
+        return jsonify(payload)
+
+    @app.route("/api/logs")
+    def api_logs():
+        def generate():
+            while True:
+                try:
+                    msg = _gui_log_queue.get(timeout=15)
+                    yield f"data: {msg}\n\n"
+                except queue.Empty:
+                    yield ": keepalive\n\n"
+        return Response(generate(), mimetype="text/event-stream",
+                        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
+
+
+def _create_flask_app():
+    """Create and configure the Flask application for the web GUI."""
+    try:
+        from flask import Flask, Response, jsonify, request
+    except ImportError as exc:
+        raise ConfigError("Flask 未安裝。請執行: pip install flask") from exc
+
+    app = Flask(__name__)
+    app.config["JSON_AS_ASCII"] = False
+    _register_gui_static_routes(app, Response)
+    _register_config_api_routes(app, jsonify, request)
+    _register_runtime_api_routes(app, jsonify, request, Response)
+    return app
+
+
+def _start_flask_background(port: int, *, host: str = "127.0.0.1") -> Any:
+    """Start Flask in a background thread and return the werkzeug server."""
+    from werkzeug.serving import make_server
+
+    app = _create_flask_app()
+    server = make_server(host, port, app, threaded=True)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    return server
+
+
+def _wait_for_gui_server(port: int, *, timeout_seconds: float = 10.0) -> None:
+    """Wait until the local GUI server accepts connections."""
+    import urllib.error
+    import urllib.request
+
+    deadline = time.monotonic() + timeout_seconds
+    url = f"http://127.0.0.1:{port}/"
+    while time.monotonic() < deadline:
+        try:
+            with urllib.request.urlopen(url, timeout=1) as response:
+                if response.status == 200:
+                    return
+        except (urllib.error.URLError, TimeoutError, OSError):
+            time.sleep(0.1)
+    raise ConfigError(f"GUI server did not start on port {port} within {timeout_seconds:.0f}s")
+
+
+def _suppress_werkzeug_logs() -> None:
     import logging as _logging
     _logging.getLogger("werkzeug").setLevel(_logging.WARNING)
 
-    app.run(host="0.0.0.0", port=port, debug=False, use_reloader=False)
+
+def _start_gui(*, port: int = 8080, open_browser: bool = True) -> None:
+    """Start the Flask web GUI server in the foreground."""
+    try:
+        app = _create_flask_app()
+    except ConfigError as exc:
+        print(f"ERROR: {exc}", file=sys.stderr)
+        sys.exit(1)
+
+    config_dir = get_tasks_config_dir()
+    _eprint("🌐 OpenCode Infinity Web GUI 啟動中...")
+    _eprint(f"   http://127.0.0.1:{port}")
+    _eprint(f"   Config dir: {config_dir}")
+
+    if open_browser:
+        def _open_browser():
+            time.sleep(1.5)
+            webbrowser.open(f"http://127.0.0.1:{port}")
+
+        threading.Thread(target=_open_browser, daemon=True).start()
+
+    _suppress_werkzeug_logs()
+    app.run(host="127.0.0.1", port=port, debug=False, use_reloader=False)
+
+
+def _start_desktop(*, port: int = DEFAULT_DESKTOP_PORT) -> None:
+    """Start the pywebview desktop GUI."""
+    server = None
+    try:
+        import webview
+    except ImportError:
+        _show_fatal_error("OpenCode Infinity", "pywebview 未安裝。請執行: pip install pywebview")
+        sys.exit(1)
+
+    try:
+        gui_index = _app_root() / "gui" / "index.html"
+        if not gui_index.is_file():
+            raise ConfigError(f"找不到 GUI 資源: {gui_index}")
+
+        _create_flask_app()
+        config_dir = get_tasks_config_dir()
+        port = _pick_listen_port(port)
+        timeout = 30.0 if getattr(sys, "frozen", False) else 10.0
+
+        _desktop_log(f"Starting desktop GUI on http://127.0.0.1:{port} (config: {config_dir})")
+        _eprint("OpenCode Infinity Desktop GUI starting...")
+        _eprint(f"   http://127.0.0.1:{port}")
+        _eprint(f"   Config dir: {config_dir}")
+
+        _suppress_werkzeug_logs()
+        server = _start_flask_background(port)
+        _wait_for_gui_server(port, timeout_seconds=timeout)
+
+        webview.create_window(
+            "OpenCode Infinity",
+            f"http://127.0.0.1:{port}",
+            width=1280,
+            height=860,
+            min_size=(960, 640),
+        )
+        start_kwargs: dict[str, Any] = {}
+        if sys.platform == "win32":
+            start_kwargs["gui"] = "edgechromium"
+        webview.start(**start_kwargs)
+    except Exception as exc:
+        _show_fatal_error(
+            "OpenCode Infinity - 啟動失敗",
+            f"{exc}\n\n詳細日誌: {_desktop_log_path()}",
+        )
+        raise SystemExit(1) from exc
+    finally:
+        if server is not None:
+            server.shutdown()
 
 
 if __name__ == "__main__":

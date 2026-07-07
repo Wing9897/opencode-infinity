@@ -1,0 +1,27 @@
+task:
+  name: "OpenCode 實測"
+  language: "繁體中文"
+  output_dir: output
+  description: "單輪實際運作測試，使用 OpenCode 免費模型"
+
+cli:
+  tool: opencode
+  model: opencode/deepseek-v4-flash-free
+
+execution:
+  delay: 1
+  timeout: 180
+  max_retries: 1
+  max_rounds: 1
+  switch_after_rounds: 0
+  auto_continue_on_error: false
+
+display:
+  show_session_id: true
+  show_token_usage: true
+  show_timestamp: true
+
+prompts:
+  - "在當前目錄建立 test_result.txt，內容只寫一行：OpenCode Infinity test OK。不要修改其他檔案。"
+
+summary_prompt: "用一句話總結本輪是否完成。"

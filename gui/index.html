@@ -4,585 +4,220 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>OpenCode Infinity - Web GUI</title>
-<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@picocss/pico@2/css/pico.min.css">
-<style>
-html, body { height: 100%; margin: 0; overflow: hidden; font-size: 15px; font-weight: 400; }
-main { height: 100vh; display: flex; flex-direction: column; padding: 0.5rem 1rem; box-sizing: border-box; }
-
-/* Top bar */
-.top-bar { display: flex; align-items: center; justify-content: space-between; padding: 0.3rem 0; margin-bottom: 0.3rem; gap: 0.5rem; }
-.top-bar h2 { margin: 0; font-size: 1.2rem; white-space: nowrap; }
-.top-bar-right { display: flex; align-items: center; gap: 0.5rem; }
-.status-badge { display: inline-block; padding: 4px 12px; border-radius: 12px; font-size: 0.85rem; font-weight: 600; white-space: nowrap; }
-.status-badge.status-idle { background: #f1f5f9; color: #64748b; }
-.status-badge.status-running { background: rgba(16,185,129,0.12); color: #10b981; animation: pulse 2s infinite; }
-.conn-badge { padding: 4px 10px; border-radius: 10px; font-size: 0.8rem; font-weight: 600; white-space: nowrap; }
-@keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.7} }
-
-/* Tabs */
-.tab-nav { display: flex; gap: 0; border-bottom: 2px solid #e2e8f0; margin-bottom: 0.5rem; }
-.tab-nav a { padding: 0.5rem 1.2rem; text-decoration: none; color: #64748b; font-weight: 500; font-size: 0.95rem; border-bottom: 2px solid transparent; margin-bottom: -2px; cursor: pointer; }
-.tab-nav a.active { color: var(--pico-primary); border-bottom-color: var(--pico-primary); }
-
-/* Tab content fills remaining space */
-.tab-content { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
-.tab-content[hidden] { display: none; }
-
-/* Console tab layout */
-#tab-console { display: flex; flex-direction: column; flex: 1; overflow: hidden; gap: 0.4rem; }
-.control-row { display: flex; gap: 0.5rem; align-items: center; }
-.control-row select, .control-row input { margin: 0; padding: 0.45rem 0.7rem; font-size: 0.9rem; height: auto; }
-.control-row select { flex: 1; max-width: 200px; }
-.control-row input[type="text"] { flex: 2; }
-.control-row button { margin: 0; padding: 0.45rem 0.9rem; font-size: 0.9rem; height: auto; white-space: nowrap; }
-
-/* Stats row */
-.stats-row { display: flex; gap: 1.5rem; padding: 0.4rem 0; border-top: 1px solid #e2e8f0; border-bottom: 1px solid #e2e8f0; }
-.stats-row .stat { display: flex; align-items: baseline; gap: 0.4rem; }
-.stats-row .stat-value { font-size: 1.3rem; font-weight: 700; color: var(--pico-primary); }
-.stats-row .stat-label { font-size: 0.8rem; color: #64748b; }
-
-/* Log panel */
-.log-panel { flex: 1; overflow-y: auto; font-family: 'Cascadia Code', 'Fira Code', monospace; font-size: 13px; line-height: 1.6; white-space: pre-wrap; word-break: break-all; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 6px; padding: 0.6rem; margin: 0; }
-.log-success { color: #10b981; }
-.log-error { color: #ef4444; }
-.log-warning { color: #f59e0b; }
-
-/* Editor tab layout */
-#tab-editor { flex: 1; overflow: hidden; }
-.editor-form { display: flex; flex-direction: column; overflow: hidden; height: 100%; }
-.editor-toolbar { display: flex; gap: 0.3rem; align-items: center; margin-bottom: 0.3rem; }
-.editor-toolbar select { flex: 1; margin: 0; padding: 0.4rem 0.6rem; font-size: 0.9rem; height: auto; }
-.editor-toolbar input { flex: 1.5; margin: 0; padding: 0.4rem 0.6rem; font-size: 0.9rem; height: auto; }
-.editor-toolbar button { margin: 0; padding: 0.4rem 0.6rem; font-size: 0.9rem; height: auto; }
-.editor-form-scroll { flex: 1; overflow-y: auto; padding-right: 0.3rem; }
-.editor-form-scroll details { margin-bottom: 0.4rem; border: 1px solid #e2e8f0; border-radius: 6px; padding: 0.5rem 0.7rem; background: #f8fafc; }
-.editor-form-scroll summary { font-size: 0.95rem; font-weight: 600; cursor: pointer; padding: 0.3rem 0; }
-.editor-col-left details { background: #f0f9ff; border-color: #bae6fd; }
-.editor-col-right details { background: #fefce8; border-color: #fde68a; }
-.editor-bottom details { background: #f8fafc; }
-.editor-form-scroll label { font-size: 0.9rem; margin-bottom: 0.4rem; display: block; }
-.editor-form-scroll input, .editor-form-scroll select, .editor-form-scroll textarea { margin-bottom: 0.4rem; padding: 0.4rem 0.6rem; font-size: 0.9rem; height: auto; }
-.editor-main-grid { display: grid; grid-template-columns: 2fr 3fr; gap: 0.5rem; margin-bottom: 0.3rem; }
-.editor-col-left, .editor-col-right { min-width: 0; }
-.editor-col-right details { height: 100%; display: flex; flex-direction: column; }
-.editor-col-right #ed-prompts-container { flex: 1; overflow-y: auto; }
-.grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 0.5rem; }
-.grid3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 0.5rem; }
-.grid5 { display: grid; grid-template-columns: repeat(5, 1fr); gap: 0.5rem; }
-.checkbox-row { display: flex; flex-wrap: wrap; gap: 0.8rem 1.5rem; padding: 0.3rem 0; }
-.checkbox-row label { display: flex; align-items: center; gap: 0.3rem; margin-bottom: 0; white-space: nowrap; }
-.checkbox-inline { display: flex; align-items: center; gap: 0.3rem; padding-top: 1.4rem; }
-#editor-status { font-size: 0.85rem; margin-bottom: 0.3rem; min-height: 1.2em; }
-
-/* Tooltip help icon */
-.help-icon { display: inline-flex; align-items: center; justify-content: center; width: 16px; height: 16px; border-radius: 50%; background: #e2e8f0; color: #64748b; font-size: 11px; font-weight: 700; cursor: help; margin-left: 4px; position: relative; vertical-align: middle; line-height: 1; }
-.help-icon:hover { background: #cbd5e1; color: #334155; }
-.help-icon .tooltip { display: none; position: absolute; left: calc(100% + 8px); top: 50%; transform: translateY(-50%); background: #1e293b; color: #f8fafc; font-size: 12px; font-weight: 400; padding: 6px 10px; border-radius: 4px; width: max-content; max-width: 300px; white-space: normal; z-index: 1000; line-height: 1.4; pointer-events: none; }
-.help-icon:hover .tooltip { display: block; }
-
-/* Prompt items */
-.prompt-item { position: relative; margin-bottom: 0.3rem; }
-.prompt-item textarea { padding-right: 2rem; font-size: 0.9rem; min-height: 55px; }
-.prompt-remove { position: absolute; top: 2px; right: 4px; background: none; border: none; color: #ef4444; cursor: pointer; font-size: 1rem; padding: 2px 5px; border-radius: 4px; }
-.prompt-remove:hover { background: rgba(239,68,68,0.15); }
-.prompt-label { font-size: 0.8rem; color: var(--pico-primary); margin-bottom: 2px; }
-</style>
+<link rel="stylesheet" href="/gui/pico.min.css">
+<link rel="stylesheet" href="/gui/styles.css">
 </head>
 <body>
 <main>
-    <!-- Top bar -->
-    <div class="top-bar">
-        <h2>OpenCode Infinity</h2>
-        <div class="top-bar-right">
-            <span id="status-badge" class="status-badge status-idle">⏸ 閒置</span>
-            <span id="connection-status" class="conn-badge" style="background:rgba(239,68,68,0.12);color:#ef4444;">● 未連線</span>
+    <header class="app-header">
+        <div class="brand">
+            <div class="brand-icon" aria-hidden="true">∞</div>
+            <div class="brand-text">
+                <h1>OpenCode Infinity</h1>
+                <p data-i18n="brandSubtitle">AI 編碼工具 7×24 無人值守自動化</p>
+            </div>
         </div>
-    </div>
+        <div class="status-group">
+            <select id="ui-lang-select" class="ui-lang-select" aria-label="UI language">
+                <option value="zh-TW">中文</option>
+                <option value="en">English</option>
+            </select>
+            <span id="status-config" class="status-pill status-config" hidden></span>
+            <span id="status-run" class="status-pill status-idle" data-i18n="statusIdle">閒置</span>
+            <span id="status-conn" class="status-pill status-disconnected" data-i18n="statusDisconnected">未連線</span>
+        </div>
+    </header>
 
-    <!-- Tab navigation -->
-    <div class="tab-nav">
-        <a href="#" class="active" onclick="switchTab('console'); return false;">🖥 控制台</a>
-        <a href="#" onclick="switchTab('editor'); return false;">📝 設定編輯器</a>
-        <a href="#" onclick="switchTab('aigen'); return false;">🤖 AI 生成</a>
-    </div>
+    <nav class="tab-nav" aria-label="Main menu">
+        <a href="#" class="active" data-tab="console" data-i18n="tabConsole" onclick="switchTab('console'); return false;">控制台</a>
+        <a href="#" data-tab="editor" data-i18n="tabEditor" onclick="switchTab('editor'); return false;">設定編輯器</a>
+    </nav>
 
     <!-- Console Tab -->
-    <div class="tab-content" id="tab-console">
-        <div class="control-row">
-            <select id="config-select"><option value="">載入中...</option></select>
-            <input type="text" id="session-id" placeholder="Session ID（留空自動生成）">
-            <button id="start-btn">▶ 啟動</button>
-            <button id="stop-btn" class="secondary" disabled>⏹ 停止</button>
+    <section class="tab-content" id="tab-console">
+        <div class="panel">
+            <div class="console-toolbar">
+                <div class="field-group">
+                    <span class="field-label" data-i18n="labelConfigFile">設定檔</span>
+                    <select id="config-select"><option value="" data-i18n="loading">載入中...</option></select>
+                </div>
+                <div class="console-actions">
+                    <button class="js-create-templates-btn secondary outline" type="button" data-i18n="btnCreateTemplates">建立範本</button>
+                    <button id="refresh-configs-btn" class="secondary outline btn-icon" type="button" data-i18n-title="refreshConfigs" title="重新載入設定檔列表">↻</button>
+                    <button id="start-btn" class="btn-start" type="button" data-i18n="btnStart">▶ 啟動</button>
+                    <button id="stop-btn" class="secondary btn-stop" type="button" data-i18n="btnStop" disabled>⏹ 停止</button>
+                </div>
+            </div>
+            <details class="console-advanced">
+                <summary data-i18n="advancedOptions">進階選項</summary>
+                <div class="control-row session-row">
+                    <input type="text" id="session-id" data-i18n-placeholder="sessionPlaceholder" placeholder="Session ID（留空自動生成）">
+                    <button id="copy-session-btn" class="secondary outline btn-icon" type="button" data-i18n-title="copySession" title="複製 Session ID" disabled>⎘</button>
+                </div>
+            </details>
+            <div class="stats-row">
+                <div class="stat-card">
+                    <span class="stat-value" id="stat-rounds">0</span>
+                    <span class="stat-label" data-i18n="statRounds">輪次</span>
+                </div>
+                <div class="stat-card">
+                    <span class="stat-value" id="stat-sessions">0</span>
+                    <span class="stat-label" data-i18n="statSessions">Session</span>
+                </div>
+                <div class="stat-card">
+                    <span class="stat-value" id="stat-elapsed">0:00</span>
+                    <span class="stat-label" data-i18n="statElapsed">耗時</span>
+                </div>
+            </div>
         </div>
-        <div class="stats-row">
-            <div class="stat"><span class="stat-value" id="stat-rounds">0</span><span class="stat-label">輪次</span></div>
-            <div class="stat"><span class="stat-value" id="stat-sessions">0</span><span class="stat-label">Session</span></div>
-            <div class="stat"><span class="stat-value" id="stat-elapsed">0:00</span><span class="stat-label">耗時</span></div>
+        <div class="log-panel-wrap">
+            <div class="log-panel-header">
+                <span class="log-panel-title" data-i18n="logTitle">即時日誌</span>
+                <div class="log-panel-actions">
+                    <button id="log-autoscroll-btn" class="ghost-btn active" type="button" data-i18n-title="logAutoscroll" data-i18n="logAutoscroll" title="自動捲動">自動捲動</button>
+                    <button id="log-clear-btn" class="ghost-btn" type="button" data-i18n-title="logClear" data-i18n="logClear" title="清除日誌">清除</button>
+                </div>
+            </div>
+            <div id="log-panel" class="log-panel">
+                <div id="log-empty" class="log-empty" data-i18n="logEmpty">選擇設定檔後點擊「啟動」，日誌會即時顯示在這裡。</div>
+            </div>
         </div>
-        <pre id="log-panel" class="log-panel"></pre>
-    </div>
+    </section>
 
     <!-- Editor Tab -->
-    <div class="tab-content" id="tab-editor" hidden>
+    <section class="tab-content" id="tab-editor" hidden>
         <div class="editor-form">
             <div class="editor-toolbar">
-                <select id="editor-load-select" onchange="editorLoad()"><option value="">-- 選擇設定檔 --</option></select>
-                <input type="text" id="editor-filename" placeholder="檔案名稱.yaml">
-                <button id="editor-save-btn">💾</button>
-                <button id="editor-reset-btn" class="contrast">🧹</button>
+                <select id="editor-load-select" onchange="editorLoad()"><option value="" data-i18n="selectConfig">選擇設定檔</option></select>
+                <input type="text" id="editor-filename" data-i18n-placeholder="filenamePlaceholder" placeholder="檔案名稱.yaml">
+                <div class="toolbar-actions">
+                    <button class="js-create-templates-btn secondary outline" type="button" data-i18n="btnCreateTemplates">建立範本</button>
+                    <button id="editor-aigen-btn" class="secondary" type="button" data-i18n="btnAiGen">AI 生成</button>
+                    <button id="editor-save-btn" type="button" data-i18n="btnSave">保存</button>
+                    <button id="editor-reset-btn" class="contrast outline" type="button" data-i18n="btnReset">清空</button>
+                </div>
             </div>
-            <div id="editor-status"></div>
+            <div id="editor-status" class="editor-status-bar" hidden>
+                <span id="editor-status-text"></span>
+                <span id="editor-dirty-badge" class="dirty-badge" data-i18n="dirtyBadge" hidden>未保存</span>
+            </div>
             <div class="editor-form-scroll">
-                <!-- Top: 2-column layout for required sections -->
                 <div class="editor-main-grid">
-                    <!-- Left column: Task & Tool -->
                     <div class="editor-col-left">
-                        <details open>
-                            <summary>🎯 任務與工具 <span style="color:#ef4444;">*</span></summary>
-                            <label>名稱 <span class="help-icon">?<span class="tooltip">設定檔的識別名稱</span></span><input type="text" id="ed-task-name" placeholder="例如：API 開發"></label>
-                            <div class="grid2">
-                                <label>工具 <span class="help-icon">?<span class="tooltip">AI CLI 工具</span></span><select id="ed-cli-tool" onchange="editorUpdateCli()"><option value="opencode">OpenCode</option><option value="claude">Claude</option><option value="codex">Codex</option><option value="copilot">Copilot</option></select></label>
-                                <label>語言 <span class="help-icon">?<span class="tooltip">輸出語言</span></span><select id="ed-task-lang"><option value="繁體中文">繁體中文</option><option value="English">English</option></select></label>
-                            </div>
-                            <label>模型 <span class="help-icon">?<span class="tooltip">指定模型名稱，留空用預設</span></span><input type="text" id="ed-cli-model" placeholder="留空使用預設"></label>
-                            <div class="grid2">
-                                <label>輸出目錄 <span class="help-icon">?<span class="tooltip">工作目錄</span></span><input type="text" id="ed-task-output" value="output"></label>
-                                <label>描述 <span class="help-icon">?<span class="tooltip">選填</span></span><input type="text" id="ed-task-desc" placeholder="選填"></label>
-                            </div>
-                            <div id="ed-codex-options" style="display:none;" class="checkbox-row">
-                                <label><input type="checkbox" id="ed-cli-fullauto"> Full Auto <span class="help-icon">?<span class="tooltip">啟用後使用 --dangerously-bypass-approvals-and-sandbox（完全繞過安全限制，僅限隔離環境使用）</span></span></label>
-                                <label><input type="checkbox" id="ed-cli-search" checked> Search <span class="help-icon">?<span class="tooltip">允許搜尋網路（透過 -c search=true）</span></span></label>
-                            </div>
-                            <label>自訂指令 <span class="help-icon">?<span class="tooltip">覆蓋預設 CLI 指令，例如 codex exec resume --skip-git-repo-check</span></span><input type="text" id="ed-cli-command" placeholder="留空使用預設指令"></label>
-                        </details>
+                        <div class="card">
+                            <details open>
+                                <summary><span data-i18n="sectionTask">任務與工具</span> <span class="required">*</span></summary>
+                                <div class="card-content">
+                                    <label><span data-i18n="labelName">名稱</span><input type="text" id="ed-task-name" data-i18n-placeholder="placeholderTaskName" placeholder="例如：API 開發"></label>
+                                    <div class="grid2">
+                                        <label><span data-i18n="labelTool">工具</span><select id="ed-cli-tool" onchange="editorUpdateCli()"><option value="opencode">OpenCode</option><option value="claude">Claude</option><option value="codex">Codex</option><option value="copilot">Copilot</option></select></label>
+                                        <label><span data-i18n="labelLanguage">語言</span><select id="ed-task-lang"><option value="繁體中文">繁體中文</option><option value="English">English</option></select></label>
+                                    </div>
+                                    <label><span data-i18n="labelModel">模型</span><input type="text" id="ed-cli-model" data-i18n-placeholder="placeholderModel" placeholder="留空使用預設"></label>
+                                    <div class="grid2">
+                                        <label><span data-i18n="labelOutputDir">輸出目錄</span><input type="text" id="ed-task-output" value="output" placeholder="output"></label>
+                                        <label><span data-i18n="labelDesc">描述</span><input type="text" id="ed-task-desc" data-i18n-placeholder="placeholderDesc" placeholder="選填"></label>
+                                    </div>
+                                    <div id="ed-codex-options" hidden class="checkbox-row">
+                                        <label><input type="checkbox" id="ed-cli-fullauto"> <span data-i18n="labelFullAuto">Full Auto</span> <span class="help-icon" data-i18n-tooltip="tooltipFullAuto">?<span class="tooltip"></span></span></label>
+                                        <label><input type="checkbox" id="ed-cli-search"> <span data-i18n="labelSearch">Search</span> <span class="help-icon" data-i18n-tooltip="tooltipSearch">?<span class="tooltip"></span></span></label>
+                                    </div>
+                                    <label><span data-i18n="labelCustomCmd">自訂指令</span> <span class="help-icon" data-i18n-tooltip="tooltipCustomCmd">?<span class="tooltip"></span></span><input type="text" id="ed-cli-command" data-i18n-placeholder="placeholderCmd" placeholder="留空使用預設指令"></label>
+                                </div>
+                            </details>
+                        </div>
                     </div>
-                    <!-- Right column: Prompts -->
                     <div class="editor-col-right">
-                        <details open>
-                            <summary>📝 循環提示詞 <span style="color:#ef4444;">*</span></summary>
-                            <div id="ed-prompts-container"></div>
-                            <button class="secondary outline" id="ed-add-prompt-btn" style="padding:0.4rem 0.7rem;font-size:0.9rem;">+ 添加提示詞</button>
-                        </details>
+                        <div class="card">
+                            <details open>
+                                <summary><span data-i18n="sectionPrompts">循環提示詞</span> <span class="required">*</span></summary>
+                                <div class="card-content">
+                                    <div id="ed-prompts-container"></div>
+                                    <button class="secondary outline" id="ed-add-prompt-btn" data-i18n="btnAddPrompt">+ 添加提示詞</button>
+                                </div>
+                            </details>
+                        </div>
                     </div>
                 </div>
-
-                <!-- Bottom: optional collapsed sections -->
                 <div class="editor-bottom">
-                    <details>
-                        <summary>🚀 執行設定</summary>
-                        <div class="grid5">
-                            <label>延遲(秒) <span class="help-icon">?<span class="tooltip">每輪間隔</span></span><input type="number" id="ed-exec-delay" value="1" min="0"></label>
-                            <label>超時(秒) <span class="help-icon">?<span class="tooltip">單次最大等待</span></span><input type="number" id="ed-exec-timeout" value="300" min="0"></label>
-                            <label>重試 <span class="help-icon">?<span class="tooltip">失敗後重試上限</span></span><input type="number" id="ed-exec-retries" value="5" min="0"></label>
-                            <label>輪次 <span class="help-icon">?<span class="tooltip">0 = 無限</span></span><input type="number" id="ed-exec-rounds" value="0" min="0"></label>
-                            <label>切換輪次 <span class="help-icon">?<span class="tooltip">幾輪後換 Session，0 = 不切換</span></span><input type="number" id="ed-exec-switch-rounds" value="0" min="0"></label>
-                        </div>
-                        <div class="grid3">
-                            <label>Max Tokens <span class="help-icon">?<span class="tooltip">最大 Token 限制，用於判斷何時切換 Session（OpenCode/Claude 支援）</span></span><input type="number" id="ed-max-tokens" value="128000" min="0"></label>
-                            <label>Token 閾值 <span class="help-icon">?<span class="tooltip">達到此比例時切換 Session（0.0-1.0）。Codex 不支援 Token 統計，會改用輪次策略</span></span><input type="number" id="ed-token-threshold" value="0.7" min="0" max="1" step="0.1"></label>
-                            <label class="checkbox-inline"><input type="checkbox" id="ed-exec-continue" checked> 錯誤時繼續 <span class="help-icon">?<span class="tooltip">遇錯自動繼續下一輪</span></span></label>
-                        </div>
-                    </details>
-                    <details>
-                        <summary>🎨 顯示設定</summary>
-                        <div class="checkbox-row">
-                            <label><input type="checkbox" id="ed-disp-session" checked> Session ID <span class="help-icon">?<span class="tooltip">日誌顯示 Session ID</span></span></label>
-                            <label><input type="checkbox" id="ed-disp-token" checked> Token 用量 <span class="help-icon">?<span class="tooltip">日誌顯示 Token 消耗</span></span></label>
-                            <label><input type="checkbox" id="ed-disp-time" checked> 時間戳 <span class="help-icon">?<span class="tooltip">日誌顯示時間</span></span></label>
-                        </div>
-                    </details>
-                    <details>
-                        <summary>📋 總結提示詞 <span class="help-icon">?<span class="tooltip">Session 切換時的總結提示</span></span></summary>
-                        <textarea id="ed-summary-prompt" rows="3" style="font-size:0.9rem;">總結本輪工作（300字內）</textarea>
-                    </details>
+                    <div class="card">
+                        <details>
+                            <summary data-i18n="sectionExec">執行設定</summary>
+                            <div class="card-content">
+                                <div class="grid3">
+                                    <label><span data-i18n="labelDelay">延遲 (秒)</span><input type="number" id="ed-exec-delay" value="1" min="0"></label>
+                                    <label><span data-i18n="labelTimeout">超時 (秒)</span><input type="number" id="ed-exec-timeout" value="300" min="0"></label>
+                                    <label><span data-i18n="labelRetries">重試</span><input type="number" id="ed-exec-retries" value="5" min="0"></label>
+                                    <label><span data-i18n="labelMaxRounds">輪次</span><input type="number" id="ed-exec-rounds" value="0" min="0" data-i18n-placeholder="placeholderRounds" placeholder="0 = 無限"></label>
+                                    <label><span data-i18n="labelSwitchRounds">切換輪次</span><input type="number" id="ed-exec-switch-rounds" value="0" min="0" data-i18n-placeholder="placeholderSwitchRounds" placeholder="0 = 不切換"></label>
+                                    <label class="checkbox-inline"><input type="checkbox" id="ed-exec-continue" checked> <span data-i18n="labelContinueOnError">錯誤時繼續</span></label>
+                                </div>
+                                <div class="grid2">
+                                    <label><span data-i18n="labelMaxTokens">Max Tokens</span> <span class="help-icon" data-i18n-tooltip="tooltipMaxTokens">?<span class="tooltip"></span></span><input type="number" id="ed-max-tokens" value="128000" min="0"></label>
+                                    <label><span data-i18n="labelTokenThreshold">Token 閾值</span> <span class="help-icon" data-i18n-tooltip="tooltipTokenThreshold">?<span class="tooltip"></span></span><input type="number" id="ed-token-threshold" value="0.7" min="0" max="1" step="0.1"></label>
+                                </div>
+                            </div>
+                        </details>
+                    </div>
+                    <div class="card">
+                        <details>
+                            <summary data-i18n="sectionAdvanced">進階設定</summary>
+                            <div class="card-content">
+                                <div class="checkbox-row">
+                                    <label><input type="checkbox" id="ed-disp-session" checked> <span data-i18n="labelShowSession">顯示 Session ID</span></label>
+                                    <label><input type="checkbox" id="ed-disp-token" checked> <span data-i18n="labelShowToken">顯示 Token 用量</span></label>
+                                    <label><input type="checkbox" id="ed-disp-time" checked> <span data-i18n="labelShowTime">顯示時間戳</span></label>
+                                </div>
+                                <label><span data-i18n="labelSummaryPrompt">總結提示詞</span> <span class="help-icon" data-i18n-tooltip="tooltipSummary">?<span class="tooltip"></span></span></label>
+                                <textarea id="ed-summary-prompt" rows="3">總結本輪工作（300字內）</textarea>
+                            </div>
+                        </details>
+                    </div>
                 </div>
             </div>
         </div>
-    </div>
+    </section>
 
-    <!-- AI Generate Tab -->
-    <div class="tab-content" id="tab-aigen" hidden>
-        <div style="display:flex; flex-direction:column; height:100%; gap:0.5rem;">
-            <div style="padding:0.5rem 0;">
-                <p style="margin:0 0 0.5rem 0; font-size:0.9rem; color:#64748b;">輸入你的任務簡述，然後複製下方的 Prompt 貼到任何 AI 工具中，它會幫你生成完整的 OpenCode Infinity 配置（任務名、描述、循環提示詞）。</p>
-                <label style="font-size:0.9rem; margin-bottom:0.3rem; display:block;">📋 你的任務簡述</label>
-                <textarea id="aigen-task-input" rows="3" placeholder="例如：幫我搜索並分析 2024 年最佳的 React UI 框架，比較功能、性能、社群活躍度，整理成表格" style="font-size:0.9rem; margin-bottom:0.5rem;"></textarea>
-                <div style="display:flex; gap:0.5rem; align-items:center;">
-                    <select id="aigen-lang" style="margin:0; padding:0.4rem 0.6rem; font-size:0.9rem; height:auto; max-width:140px;">
-                        <option value="繁體中文">繁體中文</option>
-                        <option value="English">English</option>
-                    </select>
-                    <button id="aigen-copy-btn" style="padding:0.45rem 1rem; font-size:0.9rem; white-space:nowrap;">📋 複製 AI Prompt</button>
-                    <span id="aigen-status" style="font-size:0.85rem; color:#10b981;"></span>
+    <!-- AI Generate Modal -->
+    <div class="modal-overlay" id="aigen-modal" onclick="aigenCloseOnBackdrop(event)">
+        <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="aigen-modal-title">
+            <div class="modal-header">
+                <h3 id="aigen-modal-title" data-i18n="modalTitle">AI 生成設定</h3>
+                <button class="modal-close" type="button" onclick="aigenClose()" data-i18n-attr="aria-label" data-i18n="modalClose" aria-label="關閉">×</button>
+            </div>
+            <div class="modal-body">
+                <div class="modal-step">
+                    <p class="modal-step-title" data-i18n="aigenStep1">步驟 1 · 生成 Prompt</p>
+                    <p class="modal-step-hint" data-i18n="aigenStep1Hint">描述你的任務，複製 Prompt 到外部 AI 工具。</p>
+                    <label class="field-label-block" data-i18n="aigenTaskLabel">任務簡述</label>
+                    <textarea id="aigen-task-input" rows="3" data-i18n-placeholder="aigenTaskPlaceholder" placeholder="例如：分析 2024 年最佳 React UI 框架，整理成比較表"></textarea>
+                    <div class="modal-actions">
+                        <select id="aigen-lang">
+                            <option value="繁體中文">繁體中文</option>
+                            <option value="English">English</option>
+                        </select>
+                        <button id="aigen-copy-btn" data-i18n="aigenCopy">複製 Prompt</button>
+                        <span id="aigen-status"></span>
+                    </div>
+                    <details class="modal-preview-toggle">
+                        <summary data-i18n="aigenPreview">預覽 Prompt</summary>
+                        <pre id="aigen-preview" class="modal-preview"></pre>
+                    </details>
+                </div>
+                <div class="modal-step">
+                    <p class="modal-step-title" data-i18n="aigenStep2">步驟 2 · 套用結果</p>
+                    <p class="modal-step-hint" data-i18n="aigenStep2Hint">將 AI 回覆的 YAML 貼上並套用到編輯器。</p>
+                    <textarea id="aigen-yaml-input" class="code-input" rows="6" data-i18n-placeholder="aigenYamlPlaceholder" placeholder="貼上 AI 生成的 YAML（可含 ```yaml 代碼塊）"></textarea>
+                    <div class="modal-actions">
+                        <button id="aigen-apply-btn" data-i18n="aigenApply">套用到編輯器</button>
+                    </div>
                 </div>
             </div>
-            <label style="font-size:0.85rem; color:#64748b;">⬇ 預覽（複製後貼到 ChatGPT / Claude / Gemini 等任何 AI）</label>
-            <pre id="aigen-preview" style="flex:1; overflow-y:auto; font-family:'Cascadia Code','Fira Code',monospace; font-size:12px; line-height:1.5; white-space:pre-wrap; word-break:break-all; background:#f8fafc; border:1px solid #e2e8f0; border-radius:6px; padding:0.6rem; margin:0;"></pre>
         </div>
     </div>
 </main>
-
-<script>
-// ===== Tab switching =====
-function switchTab(tab) {
-    document.getElementById('tab-console').hidden = (tab !== 'console');
-    document.getElementById('tab-editor').hidden = (tab !== 'editor');
-    document.getElementById('tab-aigen').hidden = (tab !== 'aigen');
-    document.querySelectorAll('.tab-nav a').forEach(el => el.classList.remove('active'));
-    const links = document.querySelectorAll('.tab-nav a');
-    if (tab === 'console') links[0].classList.add('active');
-    else if (tab === 'editor') links[1].classList.add('active');
-    else links[2].classList.add('active');
-    if (tab === 'aigen') aigenUpdatePreview();
-}
-
-// ===== Console Tab Logic =====
-const logPanel = document.getElementById('log-panel');
-const startBtn = document.getElementById('start-btn');
-const stopBtn = document.getElementById('stop-btn');
-const configSelect = document.getElementById('config-select');
-const sessionInput = document.getElementById('session-id');
-const statusBadge = document.getElementById('status-badge');
-const connStatus = document.getElementById('connection-status');
-let eventSource = null;
-let statusInterval = null;
-
-function loadConfigList() {
-    fetch('/api/configs')
-        .then(r => r.json())
-        .then(data => {
-            configSelect.innerHTML = '';
-            const edSelect = document.getElementById('editor-load-select');
-            edSelect.innerHTML = '<option value="">-- 選擇設定檔 --</option>';
-            if (data.configs && data.configs.length > 0) {
-                data.configs.forEach(c => {
-                    const opt = document.createElement('option');
-                    opt.value = c; opt.textContent = c;
-                    configSelect.appendChild(opt);
-                    const opt2 = document.createElement('option');
-                    opt2.value = c; opt2.textContent = c;
-                    edSelect.appendChild(opt2);
-                });
-            } else {
-                configSelect.innerHTML = '<option value="">無設定檔</option>';
-            }
-        })
-        .catch(() => { configSelect.innerHTML = '<option value="">載入失敗</option>'; });
-}
-
-function addLog(msg) {
-    const div = document.createElement('div');
-    let cls = '';
-    if (msg.includes('\u2705') || msg.includes('完成')) cls = ' log-success';
-    else if (msg.includes('\u274c') || msg.includes('失敗')) cls = ' log-error';
-    else if (msg.includes('\u26a0') || msg.includes('WARNING')) cls = ' log-warning';
-    div.className = cls;
-    div.textContent = msg;
-    logPanel.appendChild(div);
-    logPanel.scrollTop = logPanel.scrollHeight;
-    while (logPanel.children.length > 500) logPanel.removeChild(logPanel.firstChild);
-}
-
-function connectSSE() {
-    if (eventSource) eventSource.close();
-    eventSource = new EventSource('/api/logs');
-    eventSource.onopen = () => { connStatus.textContent = '● 已連線'; connStatus.style.background = 'rgba(16,185,129,0.12)'; connStatus.style.color = '#10b981'; };
-    eventSource.onmessage = (e) => { if (e.data && e.data !== ':keepalive') addLog(e.data); };
-    eventSource.onerror = () => { connStatus.textContent = '● 未連線'; connStatus.style.background = 'rgba(239,68,68,0.12)'; connStatus.style.color = '#ef4444'; eventSource.close(); setTimeout(connectSSE, 3000); };
-}
-
-function updateStatus() {
-    fetch('/api/status').then(r => r.json()).then(data => {
-        document.getElementById('stat-rounds').textContent = data.round_count || 0;
-        document.getElementById('stat-sessions').textContent = data.session_count || 0;
-        document.getElementById('stat-elapsed').textContent = data.elapsed || '0:00';
-        if (data.running) {
-            statusBadge.textContent = '\u25cf 執行中'; statusBadge.className = 'status-badge status-running';
-            startBtn.disabled = true; stopBtn.disabled = false;
-        } else {
-            statusBadge.textContent = '\u23f8 閒置'; statusBadge.className = 'status-badge status-idle';
-            startBtn.disabled = false; stopBtn.disabled = true;
-        }
-    }).catch(() => {});
-}
-
-startBtn.addEventListener('click', () => {
-    const config = configSelect.value;
-    if (!config) { addLog('\u26a0\ufe0f 請選擇設定檔'); return; }
-    const sid = sessionInput.value.trim();
-    fetch('/api/start', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({config: config, session_id: sid}) })
-    .then(r => r.json()).then(data => {
-        if (data.ok) { addLog('\ud83d\ude80 啟動請求已送出...'); sessionInput.value = data.session_id || ''; startBtn.disabled = true; stopBtn.disabled = false; }
-        else addLog('\u274c 啟動失敗: ' + (data.error || '未知錯誤'));
-    }).catch(e => addLog('\u274c 請求失敗: ' + e.message));
-});
-
-stopBtn.addEventListener('click', () => {
-    fetch('/api/stop', { method: 'POST' }).then(r => r.json()).then(data => {
-        if (data.ok) addLog('\u23f9 停止請求已送出');
-        else addLog('\u26a0\ufe0f ' + (data.error || '停止失敗'));
-    }).catch(e => addLog('\u274c 請求失敗: ' + e.message));
-});
-
-// ===== Editor Tab Logic =====
-let edPromptCounter = 0;
-
-function editorUpdateCli() {
-    const tool = document.getElementById('ed-cli-tool').value;
-    document.getElementById('ed-codex-options').style.display = (tool === 'codex') ? 'block' : 'none';
-}
-
-function editorAddPrompt(content) {
-    edPromptCounter++;
-    const container = document.getElementById('ed-prompts-container');
-    const div = document.createElement('div');
-    div.className = 'prompt-item';
-    div.id = 'ed-prompt-' + edPromptCounter;
-    div.innerHTML = '<div class="prompt-label">提示詞 #' + edPromptCounter + '</div>' +
-        '<textarea class="ed-prompt-textarea" placeholder="輸入提示詞...">' + (content || '') + '</textarea>' +
-        '<button class="prompt-remove" onclick="editorRemovePrompt(' + edPromptCounter + ')">\u00d7</button>';
-    container.appendChild(div);
-}
-
-function editorRemovePrompt(id) {
-    const el = document.getElementById('ed-prompt-' + id);
-    if (!el) return;
-    const container = document.getElementById('ed-prompts-container');
-    if (container.children.length <= 1) { alert('至少需要保留一個提示詞'); return; }
-    el.remove();
-}
-
-function editorGetPrompts() {
-    const areas = document.querySelectorAll('.ed-prompt-textarea');
-    const prompts = [];
-    areas.forEach(ta => { const v = ta.value.trim(); if (v) prompts.push(v); });
-    return prompts.length > 0 ? prompts : ['繼續工作'];
-}
-
-function editorGenerateConfig() {
-    const config = {};
-    const taskName = document.getElementById('ed-task-name').value.trim();
-    const taskDesc = document.getElementById('ed-task-desc').value.trim();
-    const taskLang = document.getElementById('ed-task-lang').value;
-    const taskOutput = document.getElementById('ed-task-output').value.trim() || 'output';
-    config.task = { name: taskName || '通用任務', language: taskLang, output_dir: taskOutput };
-    if (taskDesc) config.task.description = taskDesc;
-    const cliTool = document.getElementById('ed-cli-tool').value;
-    config.cli = { tool: cliTool };
-    const cliModel = document.getElementById('ed-cli-model').value.trim();
-    if (cliModel) config.cli.model = cliModel;
-    const cliCommand = document.getElementById('ed-cli-command').value.trim();
-    if (cliCommand) config.cli.commands = { run_session: cliCommand };
-    if (cliTool === 'codex') {
-        config.cli.full_auto = document.getElementById('ed-cli-fullauto').checked;
-        config.cli.search = document.getElementById('ed-cli-search').checked;
-    }
-    config.execution = {
-        delay: parseInt(document.getElementById('ed-exec-delay').value) || 1,
-        timeout: parseInt(document.getElementById('ed-exec-timeout').value) || 300,
-        max_retries: parseInt(document.getElementById('ed-exec-retries').value) || 5,
-        max_rounds: parseInt(document.getElementById('ed-exec-rounds').value) || 0,
-        switch_after_rounds: parseInt(document.getElementById('ed-exec-switch-rounds').value) || 0,
-        max_tokens: parseInt(document.getElementById('ed-max-tokens').value) || 128000,
-        token_threshold: parseFloat(document.getElementById('ed-token-threshold').value) || 0.7,
-        auto_continue_on_error: document.getElementById('ed-exec-continue').checked
-    };
-    config.display = {
-        show_session_id: document.getElementById('ed-disp-session').checked,
-        show_token_usage: document.getElementById('ed-disp-token').checked,
-        show_timestamp: document.getElementById('ed-disp-time').checked
-    };
-    config.prompts = editorGetPrompts();
-    config.summary_prompt = document.getElementById('ed-summary-prompt').value.trim() || '總結本輪工作（300字內）';
-    return config;
-}
-
-function editorSave() {
-    let filename = document.getElementById('editor-filename').value.trim();
-    if (!filename) {
-        filename = prompt('請輸入檔案名稱（例如 my-config.yaml）：');
-        if (!filename) return;
-    }
-    if (!filename.endsWith('.yaml') && !filename.endsWith('.yml')) filename += '.yaml';
-    const config = editorGenerateConfig();
-    fetch('/api/config/generate-yaml', {
-        method: 'POST',
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify(config)
-    }).then(r => r.json()).then(data => {
-        if (!data.yaml) { editorSetStatus('生成 YAML 失敗', true); return; }
-        return fetch('/api/config/save', {
-            method: 'POST',
-            headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({filename: filename, content: data.yaml})
-        });
-    }).then(r => { if (r) return r.json(); }).then(data => {
-        if (data && data.ok) {
-            editorSetStatus('已保存: ' + filename, false);
-            document.getElementById('editor-filename').value = filename;
-            loadConfigList();
-        } else if (data) {
-            editorSetStatus('保存失敗: ' + (data.error || '未知錯誤'), true);
-        }
-    }).catch(e => editorSetStatus('請求失敗: ' + e.message, true));
-}
-
-function editorLoad() {
-    const sel = document.getElementById('editor-load-select').value;
-    if (!sel) return;
-    fetch('/api/config/' + encodeURIComponent(sel))
-        .then(r => r.json())
-        .then(data => {
-            if (!data.content) { editorSetStatus('載入失敗', true); return; }
-            fetch('/api/config/parse-yaml', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({content: data.content})
-            }).then(r => r.json()).then(parsed => {
-                if (parsed.error) { editorSetStatus('解析失敗: ' + parsed.error, true); return; }
-                editorFillForm(parsed.config);
-                document.getElementById('editor-filename').value = sel;
-                editorSetStatus('已載入: ' + sel, false);
-            });
-        }).catch(e => editorSetStatus('載入失敗: ' + e.message, true));
-}
-
-function editorFillForm(cfg) {
-    const task = cfg.task || {};
-    const cli = cfg.cli || {};
-    const exec = cfg.execution || {};
-    const disp = cfg.display || {};
-    document.getElementById('ed-task-name').value = task.name || '';
-    document.getElementById('ed-task-desc').value = task.description || '';
-    document.getElementById('ed-task-lang').value = task.language || '繁體中文';
-    document.getElementById('ed-task-output').value = task.output_dir || 'output';
-    document.getElementById('ed-cli-tool').value = cli.tool || 'opencode';
-    document.getElementById('ed-cli-model').value = cli.model || (cfg.opencode && cfg.opencode.model) || '';
-    document.getElementById('ed-cli-fullauto').checked = cli.full_auto !== false;
-    document.getElementById('ed-cli-search').checked = cli.search !== false;
-    document.getElementById('ed-cli-command').value = (cli.commands && cli.commands.run_session) || '';
-    editorUpdateCli();
-    document.getElementById('ed-exec-delay').value = exec.delay != null ? exec.delay : 1;
-    document.getElementById('ed-exec-timeout').value = exec.timeout != null ? exec.timeout : 300;
-    document.getElementById('ed-exec-retries').value = exec.max_retries != null ? exec.max_retries : 5;
-    document.getElementById('ed-exec-rounds').value = exec.max_rounds != null ? exec.max_rounds : 0;
-    document.getElementById('ed-exec-switch-rounds').value = exec.switch_after_rounds != null ? exec.switch_after_rounds : 0;
-    var oc = cfg.opencode || {};
-    document.getElementById('ed-max-tokens').value = exec.max_tokens != null ? exec.max_tokens : (oc.max_tokens != null ? oc.max_tokens : 128000);
-    document.getElementById('ed-token-threshold').value = exec.token_threshold != null ? exec.token_threshold : (oc.token_threshold != null ? oc.token_threshold : 0.7);
-    document.getElementById('ed-exec-continue').checked = exec.auto_continue_on_error !== false;
-    document.getElementById('ed-disp-session').checked = disp.show_session_id !== false;
-    document.getElementById('ed-disp-token').checked = disp.show_token_usage !== false;
-    document.getElementById('ed-disp-time').checked = disp.show_timestamp !== false;
-    document.getElementById('ed-prompts-container').innerHTML = '';
-    edPromptCounter = 0;
-    const prompts = cfg.prompts || [''];
-    prompts.forEach(p => editorAddPrompt(typeof p === 'string' ? p : ''));
-    document.getElementById('ed-summary-prompt').value = cfg.summary_prompt || '總結本輪工作（300字內）';
-}
-
-function editorReset() {
-    if (!confirm('確定要清空所有設定嗎？')) return;
-    editorFillForm({});
-    document.getElementById('editor-filename').value = '';
-    editorSetStatus('已清空', false);
-}
-
-function editorSetStatus(msg, isError) {
-    const el = document.getElementById('editor-status');
-    el.textContent = msg;
-    el.style.color = isError ? '#ef4444' : '#10b981';
-}
-
-// Wire up editor buttons
-document.getElementById('ed-add-prompt-btn').addEventListener('click', () => editorAddPrompt(''));
-document.getElementById('editor-save-btn').addEventListener('click', editorSave);
-document.getElementById('editor-reset-btn').addEventListener('click', editorReset);
-
-// ===== AI Generate Tab Logic =====
-function aigenBuildPrompt() {
-    const taskInput = document.getElementById('aigen-task-input').value.trim();
-    const lang = document.getElementById('aigen-lang').value;
-    const userTask = taskInput || '（用戶未輸入任務描述）';
-
-    return `你是一個 AI 自動化任務配置生成器。我正在使用一個叫 "OpenCode Infinity" 的工具，它能讓 AI 編碼工具（Codex、Claude、OpenCode、Copilot）7x24 無人值守自動循環執行任務。
-
-我需要你根據我的任務簡述，生成以下三個欄位的內容：
-
-## 輸出格式（請嚴格按照此 YAML 格式輸出）
-
-\`\`\`yaml
-task:
-  name: "簡短的任務名稱（10字內）"
-  description: "詳細的任務描述（說明目標、範圍、預期產出）"
-
-prompts:
-  - "第一個循環提示詞（指示 AI 開始工作的方向）"
-  - "第二個循環提示詞（指示 AI 繼續或深入）"
-  - "第三個循環提示詞（指示 AI 檢查、驗證或整理）"
-
-summary_prompt: "總結提示詞（要求 AI 在切換 session 前總結工作）"
-\`\`\`
-
-## 規則
-
-1. **name**: 簡潔有力，一眼看出任務主題
-2. **description**: 包含具體目標、涵蓋範圍、預期輸出格式
-3. **prompts**: 生成 3-5 個循環提示詞，它們會被輪流使用：
-   - 第一個：啟動/繼續主要工作
-   - 中間的：深入分析、擴展搜索、補充細節
-   - 最後一個：檢查品質、驗證數據、整理輸出
-4. **summary_prompt**: 要求 AI 用 300 字內總結本輪完成的工作
-5. 所有內容使用「${lang}」撰寫
-6. 提示詞要具體且有方向性，避免太籠統的「繼續工作」
-
-## 我的任務簡述
-
-${userTask}
-
----
-
-請直接輸出 YAML 格式的結果，不需要額外解釋。`;
-}
-
-function aigenUpdatePreview() {
-    const preview = document.getElementById('aigen-preview');
-    preview.textContent = aigenBuildPrompt();
-}
-
-function aigenCopy() {
-    const text = aigenBuildPrompt();
-    navigator.clipboard.writeText(text).then(() => {
-        const status = document.getElementById('aigen-status');
-        status.textContent = '✅ 已複製到剪貼簿！';
-        setTimeout(() => { status.textContent = ''; }, 3000);
-    }).catch(() => {
-        // Fallback for older browsers
-        const ta = document.createElement('textarea');
-        ta.value = text;
-        ta.style.position = 'fixed';
-        ta.style.opacity = '0';
-        document.body.appendChild(ta);
-        ta.select();
-        document.execCommand('copy');
-        document.body.removeChild(ta);
-        const status = document.getElementById('aigen-status');
-        status.textContent = '✅ 已複製到剪貼簿！';
-        setTimeout(() => { status.textContent = ''; }, 3000);
-    });
-}
-
-document.getElementById('aigen-copy-btn').addEventListener('click', aigenCopy);
-document.getElementById('aigen-task-input').addEventListener('input', aigenUpdatePreview);
-document.getElementById('aigen-lang').addEventListener('change', aigenUpdatePreview);
-
-// Init
-connectSSE();
-statusInterval = setInterval(updateStatus, 2000);
-updateStatus();
-loadConfigList();
-editorAddPrompt('');
-</script>
+<div id="toast-root" class="toast-root" aria-live="polite" aria-atomic="true"></div>
+<script src="/gui/i18n.js"></script>
+<script src="/gui/app.js"></script>
 </body>
 </html>
