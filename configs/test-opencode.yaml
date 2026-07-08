@@ -1,9 +1,3 @@
-task:
-  name: "OpenCode 實測"
-  language: "繁體中文"
-  output_dir: output
-  description: "單輪實際運作測試，使用 OpenCode 免費模型"
-
 cli:
   tool: opencode
   model: opencode/deepseek-v4-flash-free

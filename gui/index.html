@@ -67,8 +67,9 @@
                 <summary data-i18n="advancedOptions">進階選項</summary>
                 <div class="advanced-grid">
                     <div class="field-group">
-                        <label class="field-label" for="working-dir" data-i18n="labelWorkingDir">工作目錄</label>
-                        <input type="text" id="working-dir" data-i18n-placeholder="workingDirPlaceholder" placeholder="工作目錄（留空沿用啟動目錄或 YAML 設定）">
+                        <label class="field-label" for="working-dir" data-i18n="labelWorkingDirOverride">工作目錄覆寫（優先）</label>
+                        <input type="text" id="working-dir" data-i18n-placeholder="workingDirOverridePlaceholder" placeholder="留空則沿用 YAML 預設或啟動目錄">
+                        <p id="working-dir-hint" class="field-hint" aria-live="polite"></p>
                     </div>
                     <div class="field-group">
                         <label class="field-label" for="session-id" data-i18n="labelSession">Session ID</label>
@@ -126,43 +127,21 @@
                 <div class="editor-panels">
                     <section class="section-panel">
                         <details open>
-                            <summary><span data-i18n="sectionTask">任務與工具</span> <span class="required">*</span></summary>
+                            <summary><span data-i18n="sectionCli">CLI 工具</span> <span class="required">*</span></summary>
                             <div class="section-content">
-                                <div class="field-group">
-                                    <label class="field-label" for="ed-task-name" data-i18n="labelName">名稱</label>
-                                    <input type="text" id="ed-task-name" data-i18n-placeholder="placeholderTaskName" placeholder="例如：API 開發">
-                                </div>
                                 <div class="field-grid field-grid-2">
                                     <div class="field-group">
-                                        <label class="field-label" for="ed-cli-tool" data-i18n="labelTool">工具</label>
+                                        <label class="field-label" for="ed-cli-tool" data-i18n="labelTool">CLI 工具</label>
                                         <select id="ed-cli-tool" onchange="editorUpdateCli()"><option value="opencode">OpenCode</option><option value="claude">Claude</option><option value="codex">Codex</option><option value="copilot">Copilot</option></select>
-                                    </div>
-                                    <div class="field-group">
-                                        <label class="field-label" for="ed-task-lang" data-i18n="labelLanguage">語言</label>
-                                        <select id="ed-task-lang"><option value="繁體中文">繁體中文</option><option value="English">English</option></select>
                                     </div>
                                 </div>
                                 <div class="field-group">
                                     <label class="field-label" for="ed-cli-model" data-i18n="labelModel">模型</label>
                                     <input type="text" id="ed-cli-model" data-i18n-placeholder="placeholderModel" placeholder="留空使用預設">
                                 </div>
-                                <div class="field-grid field-grid-2">
-                                    <div class="field-group">
-                                        <label class="field-label" for="ed-task-output" data-i18n="labelOutputDir">輸出目錄</label>
-                                        <input type="text" id="ed-task-output" value="output" placeholder="output">
-                                    </div>
-                                    <div class="field-group">
-                                        <label class="field-label" for="ed-task-desc" data-i18n="labelDesc">描述</label>
-                                        <input type="text" id="ed-task-desc" data-i18n-placeholder="placeholderDesc" placeholder="選填">
-                                    </div>
-                                </div>
                                 <div id="ed-codex-options" hidden class="option-chip-row">
                                     <label class="option-chip"><input type="checkbox" id="ed-cli-fullauto"> <span data-i18n="labelFullAuto">Full Auto</span> <span class="help-icon" data-i18n-tooltip="tooltipFullAuto">?<span class="tooltip"></span></span></label>
                                     <label class="option-chip"><input type="checkbox" id="ed-cli-search"> <span data-i18n="labelSearch">Search</span> <span class="help-icon" data-i18n-tooltip="tooltipSearch">?<span class="tooltip"></span></span></label>
-                                </div>
-                                <div class="field-group">
-                                    <label class="field-label" for="ed-cli-command"><span data-i18n="labelCustomCmd">自訂指令</span> <span class="help-icon" data-i18n-tooltip="tooltipCustomCmd">?<span class="tooltip"></span></span></label>
-                                    <input type="text" id="ed-cli-command" data-i18n-placeholder="placeholderCmd" placeholder="留空使用預設指令">
                                 </div>
                             </div>
                         </details>
@@ -203,8 +182,9 @@
                                     </div>
                                 </div>
                                 <div class="field-group">
-                                    <label class="field-label" for="ed-exec-working-dir" data-i18n="labelWorkingDir">工作目錄</label>
+                                    <label class="field-label" for="ed-exec-working-dir" data-i18n="labelWorkingDirYaml">預設工作目錄（YAML）</label>
                                     <input type="text" id="ed-exec-working-dir" data-i18n-placeholder="placeholderWorkingDir" placeholder="留空沿用啟動目錄">
+                                    <p class="field-hint" data-i18n="workingDirYamlHint">保存到設定檔；控制台「工作目錄覆寫」優先於此值</p>
                                 </div>
                             </div>
                         </details>

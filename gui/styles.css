@@ -193,6 +193,13 @@ html, body {
     text-overflow: ellipsis;
 }
 
+.field-hint {
+    margin: var(--space-1) 0 0;
+    font-size: 0.8rem;
+    color: var(--text-muted);
+    line-height: 1.45;
+}
+
 /* Hint */
 .config-hint {
     margin: 0;

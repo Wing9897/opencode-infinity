@@ -180,6 +180,8 @@ const stopBtn = document.getElementById('stop-btn');
 const configSelect = document.getElementById('config-select');
 const sessionInput = document.getElementById('session-id');
 const workingDirInput = document.getElementById('working-dir');
+const workingDirHint = document.getElementById('working-dir-hint');
+const yamlWorkingDirByConfig = {};
 const copySessionBtn = document.getElementById('copy-session-btn');
 const statusRun = document.getElementById('status-run');
 const statusConn = document.getElementById('status-conn');
@@ -219,18 +221,61 @@ function syncConfigSelection(name) {
     prefillWorkingDirFromConfig(name);
 }
 
+function workingDirStorageKey(name) {
+    return STORAGE_KEY_WORKING_DIR + ':' + name;
+}
+
+function migrateLegacyWorkingDirOverride(configName) {
+    const legacy = localStorage.getItem(STORAGE_KEY_WORKING_DIR);
+    if (!legacy || !configName) return;
+    if (!localStorage.getItem(workingDirStorageKey(configName))) {
+        localStorage.setItem(workingDirStorageKey(configName), legacy);
+    }
+    localStorage.removeItem(STORAGE_KEY_WORKING_DIR);
+}
+
+function fetchYamlWorkingDir(name) {
+    if (!name) return Promise.resolve('');
+    if (Object.prototype.hasOwnProperty.call(yamlWorkingDirByConfig, name)) {
+        return Promise.resolve(yamlWorkingDirByConfig[name]);
+    }
+    return apiFetch('/api/config/' + encodeURIComponent(name))
+        .then((data) => {
+            yamlWorkingDirByConfig[name] = data.working_dir || '';
+            return yamlWorkingDirByConfig[name];
+        })
+        .catch(() => {
+            yamlWorkingDirByConfig[name] = '';
+            return '';
+        });
+}
+
+function updateWorkingDirHint() {
+    if (!workingDirHint) return;
+    const configName = configSelect.value;
+    const override = workingDirInput ? workingDirInput.value.trim() : '';
+    const yamlDir = configName ? (yamlWorkingDirByConfig[configName] || '') : '';
+    if (override) {
+        workingDirHint.textContent = t('workingDirHintOverride', { path: override });
+    } else if (yamlDir) {
+        workingDirHint.textContent = t('workingDirHintYaml', { path: yamlDir });
+    } else {
+        workingDirHint.textContent = t('workingDirHintLaunch');
+    }
+}
+
+function saveWorkingDirOverride(name, value) {
+    if (!name) return;
+    const key = workingDirStorageKey(name);
+    if (value) localStorage.setItem(key, value);
+    else localStorage.removeItem(key);
+}
+
 function prefillWorkingDirFromConfig(name) {
     if (!name || !workingDirInput) return;
-    const saved = localStorage.getItem(STORAGE_KEY_WORKING_DIR);
-    if (saved) {
-        workingDirInput.value = saved;
-        return;
-    }
-    apiFetch('/api/config/' + encodeURIComponent(name))
-        .then((data) => {
-            if (data.working_dir) workingDirInput.value = data.working_dir;
-        })
-        .catch(() => {});
+    migrateLegacyWorkingDirOverride(name);
+    workingDirInput.value = localStorage.getItem(workingDirStorageKey(name)) || '';
+    fetchYamlWorkingDir(name).then(() => updateWorkingDirHint());
 }
 
 function loadConfigList(selectName) {
@@ -281,11 +326,20 @@ function createFactoryTemplates(btn) {
             return data;
         }
         const created = data.created || [];
-        const skipped = data.skipped || [];
-        if (created.length) showToast(t('toastTemplatesCreated', { names: created.join(', ') }), 'success');
-        else if (skipped.length) showToast(t('toastTemplatesSkipped', { names: skipped.join(', ') }), 'info');
-        else showToast(t('toastTemplatesNone'), 'info');
-        return loadConfigList(created[0] || configSelect.value).then(() => data);
+        const overwritten = data.overwritten || [];
+        const names = [...created, ...overwritten];
+        if (names.length) {
+            if (overwritten.length) {
+                showToast(t('toastTemplatesOverwritten', { names: names.join(', ') }), 'success');
+            } else {
+                showToast(t('toastTemplatesCreated', { names: created.join(', ') }), 'success');
+            }
+        } else if (data.errors && data.errors.length) {
+            showToast(data.errors.join('; ') || t('toastTemplatesFailed'), 'error');
+        } else {
+            showToast(t('toastTemplatesFailed'), 'error');
+        }
+        return loadConfigList(names[0] || configSelect.value).then(() => data);
     })
     .catch(() => {
         if (btn) setButtonLoading(btn, false);
@@ -517,8 +571,7 @@ startBtn.addEventListener('click', () => {
     }
     const sid = sessionInput.value.trim();
     const workingDir = workingDirInput ? workingDirInput.value.trim() : '';
-    if (workingDir) localStorage.setItem(STORAGE_KEY_WORKING_DIR, workingDir);
-    else localStorage.removeItem(STORAGE_KEY_WORKING_DIR);
+    saveWorkingDirOverride(config, workingDir);
     setButtonLoading(startBtn, true, t('starting'));
     apiFetch('/api/start', {
         method: 'POST',
@@ -607,12 +660,12 @@ copySessionBtn.addEventListener('click', () => {
 sessionInput.addEventListener('input', updateAppStatusBadge);
 
 if (workingDirInput) {
-    const savedWorkingDir = localStorage.getItem(STORAGE_KEY_WORKING_DIR);
-    if (savedWorkingDir) workingDirInput.value = savedWorkingDir;
+    workingDirInput.addEventListener('input', updateWorkingDirHint);
     workingDirInput.addEventListener('change', () => {
+        const configName = configSelect.value;
         const value = workingDirInput.value.trim();
-        if (value) localStorage.setItem(STORAGE_KEY_WORKING_DIR, value);
-        else localStorage.removeItem(STORAGE_KEY_WORKING_DIR);
+        saveWorkingDirOverride(configName, value);
+        updateWorkingDirHint();
     });
 }
 
@@ -671,36 +724,23 @@ function editorGetPrompts() {
 }
 
 function editorValidate() {
-    const taskName = document.getElementById('ed-task-name');
     let hasPrompt = false;
     document.querySelectorAll('.ed-prompt-textarea').forEach(ta => {
         if (ta.value.trim()) hasPrompt = true;
     });
-    let valid = true;
-    taskName.classList.remove('field-invalid');
-    if (!taskName.value.trim()) {
-        taskName.classList.add('field-invalid');
-        valid = false;
+    if (!hasPrompt) {
+        showToast(t('toastRequiredFields'), 'error');
+        return false;
     }
-    if (!hasPrompt) valid = false;
-    if (!valid) showToast(t('toastRequiredFields'), 'error');
-    return valid;
+    return true;
 }
 
 function editorGenerateConfig() {
     const config = {};
-    const taskName = document.getElementById('ed-task-name').value.trim();
-    const taskDesc = document.getElementById('ed-task-desc').value.trim();
-    const taskLang = document.getElementById('ed-task-lang').value;
-    const taskOutput = document.getElementById('ed-task-output').value.trim() || 'output';
-    config.task = { name: taskName || t('defaultTaskName'), language: taskLang, output_dir: taskOutput };
-    if (taskDesc) config.task.description = taskDesc;
     const cliTool = document.getElementById('ed-cli-tool').value;
     config.cli = { tool: cliTool };
     const cliModel = document.getElementById('ed-cli-model').value.trim();
     if (cliModel) config.cli.model = cliModel;
-    const cliCommand = document.getElementById('ed-cli-command').value.trim();
-    if (cliCommand) config.cli.commands = { run_session: cliCommand };
     if (cliTool === 'codex') {
         config.cli.full_auto = document.getElementById('ed-cli-fullauto').checked;
         config.cli.search = document.getElementById('ed-cli-search').checked;
@@ -758,6 +798,11 @@ function editorSave() {
         if (data && data.ok) {
             editorSetStatus(t('statusSaved', { name: filename }), false);
             document.getElementById('editor-filename').value = filename;
+            const savedWorkingDir = config.execution && config.execution.working_dir
+                ? config.execution.working_dir
+                : '';
+            yamlWorkingDirByConfig[filename] = savedWorkingDir;
+            if (configSelect.value === filename) updateWorkingDirHint();
             clearEditorDirty();
             loadConfigList(filename);
             showToast(t('toastSaved'), 'success');
@@ -793,8 +838,9 @@ function editorLoad() {
             editorFillForm(parsed.config);
             document.getElementById('editor-filename').value = sel;
             syncConfigSelection(sel);
-            if (parsed.config.execution && parsed.config.execution.working_dir && workingDirInput) {
-                workingDirInput.value = parsed.config.execution.working_dir;
+            if (parsed.config.execution) {
+                yamlWorkingDirByConfig[sel] = parsed.config.execution.working_dir || '';
+                updateWorkingDirHint();
             }
             editorSetStatus(t('statusLoaded', { name: sel }), false);
             showToast(t('toastLoaded', { name: sel }), 'info');
@@ -804,19 +850,13 @@ function editorLoad() {
 
 function editorFillForm(cfg) {
     editorSuppressDirty = true;
-    const task = cfg.task || {};
     const cli = cfg.cli || {};
     const exec = cfg.execution || {};
     const disp = cfg.display || {};
-    document.getElementById('ed-task-name').value = task.name || '';
-    document.getElementById('ed-task-desc').value = task.description || '';
-    document.getElementById('ed-task-lang').value = task.language || '繁體中文';
-    document.getElementById('ed-task-output').value = task.output_dir || 'output';
     document.getElementById('ed-cli-tool').value = cli.tool || 'opencode';
     document.getElementById('ed-cli-model').value = cli.model || '';
     document.getElementById('ed-cli-fullauto').checked = cli.full_auto === true;
     document.getElementById('ed-cli-search').checked = cli.search === true;
-    document.getElementById('ed-cli-command').value = (cli.commands && cli.commands.run_session) || '';
     editorUpdateCli();
     document.getElementById('ed-exec-delay').value = exec.delay != null ? exec.delay : 1;
     document.getElementById('ed-exec-timeout').value = exec.timeout != null ? exec.timeout : 300;
@@ -835,7 +875,6 @@ function editorFillForm(cfg) {
     const prompts = cfg.prompts || [''];
     prompts.forEach(p => editorAddPrompt(typeof p === 'string' ? p : ''));
     document.getElementById('ed-summary-prompt').value = cfg.summary_prompt || t('defaultSummary');
-    document.getElementById('ed-task-name').classList.remove('field-invalid');
     editorSuppressDirty = false;
     clearEditorDirty();
 }
@@ -881,8 +920,6 @@ if (editorScroll) {
 // ===== AI Generate Modal Logic =====
 function aigenOpen() {
     const modal = document.getElementById('aigen-modal');
-    const editorLang = document.getElementById('ed-task-lang').value;
-    if (editorLang) document.getElementById('aigen-lang').value = editorLang;
     aigenUpdatePreview();
     modal.classList.add('open');
     document.getElementById('aigen-task-input').focus();
@@ -978,6 +1015,11 @@ document.addEventListener('keydown', (event) => {
         }
     }
 });
+
+function refreshDynamicI18n() {
+    updateWorkingDirHint();
+    updateAppStatusBadge();
+}
 
 // Init
 updateAppStatusBadge();

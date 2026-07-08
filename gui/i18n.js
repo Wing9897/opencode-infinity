@@ -1,4 +1,4 @@
-// UI locale (interface language). Separate from task output language in YAML.
+// UI locale (interface language).
 const STORAGE_KEY_LOCALE = 'oci_ui_locale';
 
 const MESSAGES = {
@@ -24,8 +24,13 @@ const MESSAGES = {
         btnStart: '▶ 啟動',
         btnStop: '⏹ 停止',
         advancedOptions: '進階選項',
-        labelWorkingDir: '工作目錄',
-        workingDirPlaceholder: '工作目錄（留空沿用啟動目錄或 YAML 設定）',
+        labelWorkingDirOverride: '工作目錄覆寫（優先）',
+        workingDirOverridePlaceholder: '留空則沿用 YAML 預設或啟動目錄',
+        workingDirHintOverride: '啟動時將使用：{path}（控制台覆寫）',
+        workingDirHintYaml: '啟動時將使用：{path}（YAML 預設）',
+        workingDirHintLaunch: '啟動時將使用：程式啟動目錄（兩處皆留空）',
+        labelWorkingDirYaml: '預設工作目錄（YAML）',
+        workingDirYamlHint: '保存到設定檔；控制台「工作目錄覆寫」優先於此值',
         labelSession: 'Session ID',
         sessionPlaceholder: 'Session ID（留空自動生成）',
         copySession: '複製 Session ID',
@@ -45,14 +50,9 @@ const MESSAGES = {
         btnSave: '保存',
         btnReset: '清空',
         dirtyBadge: '未保存',
-        sectionTask: '任務與工具',
-        labelName: '名稱',
-        labelTool: '工具',
-        labelLanguage: '語言',
+        sectionCli: 'CLI 工具',
+        labelTool: 'CLI 工具',
         labelModel: '模型',
-        labelOutputDir: '輸出目錄',
-        labelDesc: '描述',
-        labelCustomCmd: '自訂指令',
         labelFullAuto: 'Full Auto',
         labelSearch: 'Search',
         sectionPrompts: '循環提示詞',
@@ -72,10 +72,7 @@ const MESSAGES = {
         labelShowToken: '顯示 Token 用量',
         labelShowTime: '顯示時間戳',
         labelSummaryPrompt: '總結提示詞',
-        placeholderTaskName: '例如：API 開發',
         placeholderModel: '留空使用預設',
-        placeholderDesc: '選填',
-        placeholderCmd: '留空使用預設指令',
         placeholderRounds: '0 = 無限',
         placeholderSwitchRounds: '0 = 不切換',
         placeholderPrompt: '輸入提示詞...',
@@ -83,7 +80,6 @@ const MESSAGES = {
         defaultSummary: '總結本輪工作（300字內）',
         tooltipFullAuto: '啟用後使用 --dangerously-bypass-approvals-and-sandbox（完全繞過安全限制，僅限隔離環境使用）',
         tooltipSearch: '允許搜尋網路（透過 -c search=true）',
-        tooltipCustomCmd: '覆蓋預設 CLI 指令，例如 codex exec resume --skip-git-repo-check',
         tooltipMaxTokens: '最大 Token 限制，用於判斷何時切換 Session（OpenCode/Claude 支援）',
         tooltipTokenThreshold: '達到此比例時切換 Session（0.0-1.0）。Codex 不支援 Token 統計，會改用輪次策略',
         tooltipSummary: 'Session 切換時的總結提示',
@@ -116,13 +112,12 @@ const MESSAGES = {
         toastConfigsRefreshed: '設定檔列表已更新',
         toastConfigsLoadFailed: '設定檔列表載入失敗',
         toastTemplatesCreated: '已建立範本：{names}',
-        toastTemplatesSkipped: '範本已存在，未覆蓋：{names}',
-        toastTemplatesNone: '所有範本都已存在，未做任何變更',
+        toastTemplatesOverwritten: '已覆蓋範本：{names}',
         toastTemplatesFailed: '建立範本失敗',
         toastSessionCopied: 'Session ID 已複製',
         toastCopyFailed: '複製失敗',
         toastNeedPrompt: '至少需要保留一個提示詞',
-        toastRequiredFields: '請完成必填欄位（名稱、提示詞）',
+        toastRequiredFields: '請至少填寫一個提示詞',
         toastSaved: '設定已保存',
         toastSaveFailed: '保存失敗',
         toastSaveRequestFailed: '保存請求失敗',
@@ -140,7 +135,6 @@ const MESSAGES = {
         statusCleared: '已清空',
         statusAiApplied: '已套用 AI 生成的設定，請檢查後再保存',
         aigenCopied: '已複製到剪貼簿',
-        defaultTaskName: '通用任務',
         defaultPrompt: '繼續工作',
         unknownError: '未知錯誤',
         logStartSent: '🚀 啟動請求已送出...',
@@ -171,8 +165,13 @@ const MESSAGES = {
         btnStart: '▶ Start',
         btnStop: '⏹ Stop',
         advancedOptions: 'Advanced',
-        labelWorkingDir: 'Working directory',
-        workingDirPlaceholder: 'Working directory (empty = launch dir or YAML)',
+        labelWorkingDirOverride: 'Working dir override (priority)',
+        workingDirOverridePlaceholder: 'Empty = YAML default or launch directory',
+        workingDirHintOverride: 'Will use: {path} (console override)',
+        workingDirHintYaml: 'Will use: {path} (YAML default)',
+        workingDirHintLaunch: 'Will use: launch directory (both empty)',
+        labelWorkingDirYaml: 'Default working dir (YAML)',
+        workingDirYamlHint: 'Saved to config; console override takes priority',
         labelSession: 'Session ID',
         sessionPlaceholder: 'Session ID (auto-generated if empty)',
         copySession: 'Copy Session ID',
@@ -192,14 +191,9 @@ const MESSAGES = {
         btnSave: 'Save',
         btnReset: 'Clear',
         dirtyBadge: 'Unsaved',
-        sectionTask: 'Task & Tool',
-        labelName: 'Name',
-        labelTool: 'Tool',
-        labelLanguage: 'Language',
+        sectionCli: 'CLI',
+        labelTool: 'CLI tool',
         labelModel: 'Model',
-        labelOutputDir: 'Output dir',
-        labelDesc: 'Description',
-        labelCustomCmd: 'Custom command',
         labelFullAuto: 'Full Auto',
         labelSearch: 'Search',
         sectionPrompts: 'Rotating prompts',
@@ -219,10 +213,7 @@ const MESSAGES = {
         labelShowToken: 'Show token usage',
         labelShowTime: 'Show timestamps',
         labelSummaryPrompt: 'Summary prompt',
-        placeholderTaskName: 'e.g. API development',
         placeholderModel: 'Leave empty for default',
-        placeholderDesc: 'Optional',
-        placeholderCmd: 'Leave empty for default command',
         placeholderRounds: '0 = unlimited',
         placeholderSwitchRounds: '0 = no switch',
         placeholderPrompt: 'Enter prompt...',
@@ -230,7 +221,6 @@ const MESSAGES = {
         defaultSummary: 'Summarize this round (max 300 words)',
         tooltipFullAuto: 'Uses --dangerously-bypass-approvals-and-sandbox (isolated environments only)',
         tooltipSearch: 'Allow web search (via -c search=true)',
-        tooltipCustomCmd: 'Override default CLI command, e.g. codex exec resume --skip-git-repo-check',
         tooltipMaxTokens: 'Max token limit for session switch (OpenCode/Claude)',
         tooltipTokenThreshold: 'Switch session at this ratio (0.0-1.0). Codex uses round strategy instead',
         tooltipSummary: 'Summary prompt when switching sessions',
@@ -263,13 +253,12 @@ const MESSAGES = {
         toastConfigsRefreshed: 'Config list updated',
         toastConfigsLoadFailed: 'Failed to load config list',
         toastTemplatesCreated: 'Created templates: {names}',
-        toastTemplatesSkipped: 'Templates already exist (unchanged): {names}',
-        toastTemplatesNone: 'All templates already exist',
+        toastTemplatesOverwritten: 'Overwrote templates: {names}',
         toastTemplatesFailed: 'Failed to create templates',
         toastSessionCopied: 'Session ID copied',
         toastCopyFailed: 'Copy failed',
         toastNeedPrompt: 'Keep at least one prompt',
-        toastRequiredFields: 'Complete required fields (name, prompts)',
+        toastRequiredFields: 'Add at least one prompt',
         toastSaved: 'Config saved',
         toastSaveFailed: 'Save failed',
         toastSaveRequestFailed: 'Save request failed',
@@ -287,7 +276,6 @@ const MESSAGES = {
         statusCleared: 'Cleared',
         statusAiApplied: 'AI config applied — review before saving',
         aigenCopied: 'Copied to clipboard',
-        defaultTaskName: 'General task',
         defaultPrompt: 'Continue working',
         unknownError: 'Unknown error',
         logStartSent: '🚀 Start request sent...',
@@ -301,15 +289,11 @@ const MESSAGES = {
 const AIGEN_PROMPTS = {
     '繁體中文': `你是一個 AI 自動化任務配置生成器。我正在使用一個叫 "OpenCode Infinity" 的工具，它能讓 AI 編碼工具（Codex、Claude、OpenCode、Copilot）7x24 無人值守自動循環執行任務。
 
-我需要你根據我的任務簡述，生成以下三個欄位的內容：
+我需要你根據我的任務簡述，生成以下 YAML 欄位：
 
 ## 輸出格式（請嚴格按照此 YAML 格式輸出）
 
 \`\`\`yaml
-task:
-  name: "簡短的任務名稱（10字內）"
-  description: "詳細的任務描述（說明目標、範圍、預期產出）"
-
 prompts:
   - "第一個循環提示詞（指示 AI 開始工作的方向）"
   - "第二個循環提示詞（指示 AI 繼續或深入）"
@@ -320,12 +304,10 @@ summary_prompt: "總結提示詞（要求 AI 在切換 session 前總結工作�
 
 ## 規則
 
-1. **name**: 簡潔有力，一眼看出任務主題
-2. **description**: 包含具體目標、涵蓋範圍、預期輸出格式
-3. **prompts**: 生成 3-5 個循環提示詞，它們會被輪流使用
-4. **summary_prompt**: 要求 AI 用 300 字內總結本輪完成的工作
-5. 所有內容使用「{lang}」撰寫
-6. 提示詞要具體且有方向性，避免太籠統的「繼續工作」
+1. **prompts**: 生成 3-5 個循環提示詞，它們會被輪流使用
+2. **summary_prompt**: 要求 AI 用 300 字內總結本輪完成的工作
+3. 所有內容使用「{lang}」撰寫
+4. 提示詞要具體且有方向性，避免太籠統的「繼續工作」
 
 ## 我的任務簡述
 
@@ -341,10 +323,6 @@ Generate the following YAML fields from my task summary:
 ## Output format (strict YAML)
 
 \`\`\`yaml
-task:
-  name: "Short task name (max 10 words)"
-  description: "Detailed description (goals, scope, expected output)"
-
 prompts:
   - "First rotating prompt"
   - "Second rotating prompt"
@@ -355,12 +333,10 @@ summary_prompt: "Summary prompt before session switch"
 
 ## Rules
 
-1. **name**: concise and clear
-2. **description**: goals, scope, deliverables
-3. **prompts**: 3-5 specific rotating prompts
-4. **summary_prompt**: summarize the round in ~300 words
-5. Write everything in "{lang}"
-6. Avoid vague prompts like "continue working"
+1. **prompts**: 3-5 specific rotating prompts
+2. **summary_prompt**: summarize the round in ~300 words
+3. Write everything in "{lang}"
+4. Avoid vague prompts like "continue working"
 
 ## My task summary
 

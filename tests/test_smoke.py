@@ -64,21 +64,22 @@ class SmokeTests(unittest.TestCase):
             result = self.mod._create_factory_templates(config_dir)
             self.assertEqual(result["errors"], [])
             self.assertEqual(sorted(result["created"]), ["codex.yaml", "opencode.yaml"])
-            self.assertEqual(result["skipped"], [])
+            self.assertEqual(result["overwritten"], [])
             self.assertEqual(
                 sorted(path.name for path in config_dir.glob("*.yaml")),
                 ["codex.yaml", "opencode.yaml"],
             )
 
-    def test_create_factory_templates_skips_existing(self) -> None:
+    def test_create_factory_templates_overwrites_existing(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             existing = Path(tmp) / "opencode.yaml"
             existing.write_text("custom: true\n", encoding="utf-8")
             config_dir = self.mod.init_config_dir(tmp)
             result = self.mod._create_factory_templates(config_dir)
-            self.assertEqual(existing.read_text(encoding="utf-8"), "custom: true\n")
+            self.assertEqual(result["errors"], [])
             self.assertEqual(result["created"], ["codex.yaml"])
-            self.assertEqual(result["skipped"], ["opencode.yaml"])
+            self.assertEqual(result["overwritten"], ["opencode.yaml"])
+            self.assertIn("連載文章創作", existing.read_text(encoding="utf-8"))
 
     def test_resolve_config_path(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -234,6 +235,23 @@ class SmokeTests(unittest.TestCase):
             )
             self.assertEqual(response.status_code, 400)
             self.assertFalse(response.get_json()["ok"])
+
+    def test_legacy_task_section_still_loads(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            config_path = Path(tmp) / "legacy.yaml"
+            config_path.write_text(
+                "task:\n  name: legacy\n  language: English\n"
+                "cli:\n  tool: codex\n"
+                "prompts:\n  - go\n",
+                encoding="utf-8",
+            )
+            loader = self.mod.ConfigLoader(config_path)
+            errors = loader.validate(loader._read_yaml())
+            warnings = [e for e in errors if e.severity == "warning"]
+            self.assertTrue(any("task" in e.field_path for e in warnings))
+            config = loader.load()
+            self.assertEqual(config.cli.tool, "codex")
+            self.assertEqual(config.prompts, ["go"])
 
     def test_executor_passes_subprocess_cwd(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

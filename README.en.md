@@ -88,10 +88,6 @@ python opencode_infinity.py --config-dir ./configs codex
 Example config:
 
 ```yaml
-task:
-  name: "My task"
-  language: "English"
-
 cli:
   tool: "codex"           # opencode / claude / codex / copilot
   model: ""               # empty = default, or e.g. openai/gpt-5.2-codex

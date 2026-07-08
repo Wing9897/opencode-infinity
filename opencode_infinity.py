@@ -330,16 +330,6 @@ def safe_filename(text: str, *, replacement: str = "_", max_length: int = 128) -
 
 
 @dataclass(frozen=True)
-class TaskConfig:
-    """Task-level configuration."""
-
-    name: str = "通用任務"
-    description: str = ""
-    language: str = "繁體中文"
-    output_dir: str = "output"
-
-
-@dataclass(frozen=True)
 class CLIConfig:
     """CLI tool configuration."""
 
@@ -380,7 +370,6 @@ class DisplayConfig:
 class AppConfig:
     """Top-level application configuration combining all sections."""
 
-    task: TaskConfig = field(default_factory=TaskConfig)
     cli: CLIConfig = field(default_factory=CLIConfig)
     execution: ExecutionConfig = field(default_factory=ExecutionConfig)
     display: DisplayConfig = field(default_factory=DisplayConfig)
@@ -627,13 +616,6 @@ def _create_file_handler(
 
 # --- Defaults ---
 
-TASK_DEFAULTS: dict[str, Any] = {
-    "name": "通用任務",
-    "description": "",
-    "language": "繁體中文",
-    "output_dir": "output",
-}
-
 CLI_DEFAULTS: dict[str, Any] = {
     "tool": "opencode",
     "full_auto": False,
@@ -691,13 +673,6 @@ class FieldSchema:
     valid_values: Optional[tuple[str, ...]] = None
 
 
-TASK_SCHEMA: dict[str, FieldSchema] = {
-    "name": FieldSchema(field_type=FieldType.STR, required=False),
-    "description": FieldSchema(field_type=FieldType.STR, required=False),
-    "language": FieldSchema(field_type=FieldType.STR, required=False),
-    "output_dir": FieldSchema(field_type=FieldType.STR, required=False),
-}
-
 CLI_SCHEMA: dict[str, FieldSchema] = {
     "tool": FieldSchema(
         field_type=FieldType.STR,
@@ -744,7 +719,6 @@ SUMMARY_PROMPT_SCHEMA: FieldSchema = FieldSchema(
 )
 
 SECTION_SCHEMAS: dict[str, dict[str, FieldSchema]] = {
-    "task": TASK_SCHEMA,
     "cli": CLI_SCHEMA,
     "execution": EXECUTION_SCHEMA,
     "display": DISPLAY_SCHEMA,
@@ -1112,7 +1086,6 @@ class ConfigLoader:
         return errors
 
     def _build_config(self, raw: dict[str, Any]) -> AppConfig:
-        task = self._build_task_config(raw.get("task", {}))
         cli = self._build_cli_config(raw.get("cli", {}))
         execution = self._build_execution_config(raw.get("execution", {}))
         display = self._build_display_config(raw.get("display", {}))
@@ -1120,7 +1093,6 @@ class ConfigLoader:
         summary_prompt = self._normalize_summary_prompt(raw.get("summary_prompt"))
 
         return AppConfig(
-            task=task,
             cli=cli,
             execution=execution,
             display=display,
@@ -1143,16 +1115,6 @@ class ConfigLoader:
         if not isinstance(raw_summary_prompt, str):
             return SUMMARY_PROMPT_DEFAULT
         return normalize_newlines(raw_summary_prompt)
-
-    def _build_task_config(self, raw: Any) -> TaskConfig:
-        if not isinstance(raw, dict):
-            return TaskConfig()
-        return TaskConfig(
-            name=raw.get("name", TASK_DEFAULTS["name"]),
-            description=raw.get("description", TASK_DEFAULTS["description"]),
-            language=raw.get("language", TASK_DEFAULTS["language"]),
-            output_dir=raw.get("output_dir", TASK_DEFAULTS["output_dir"]),
-        )
 
     def _build_cli_config(self, raw: Any) -> CLIConfig:
         if not isinstance(raw, dict):
@@ -2594,13 +2556,8 @@ def _get_user_config_dir() -> Path:
 
 
 _FACTORY_SEED_CONFIGS: dict[str, str] = {
-    "opencode.yaml": """# OpenCode 出廠範本
-task:
-  name: "通用任務"
-  description: "OpenCode 自動執行 - 可根據需求修改提示詞"
-  language: "繁體中文"
-  output_dir: output
-
+    "opencode.yaml": """# OpenCode 出廠範本 · 連載文章創作
+# 每輪只寫一小段，接續前稿繼續寫，不要一輪完結全篇
 cli:
   tool: opencode
 
@@ -2621,35 +2578,36 @@ display:
 
 prompts:
   - |
-    生成實用工具函數：
-    - 字符串處理函數
-    - 日期格式化工具
-    - 數據驗證函數
-    - 包含完整的文檔和測試
+    在 output/articles/ 建立或打開連載草稿 draft.md（已有檔案則讀取，不要重寫）：
+    - 本輪只做：確定主題、列出 4-6 個章節大綱
+    - 撰寫「開篇 + 第一章」約 400-600 字
+    - 文末加上 <!-- CONTINUE: 下一章節標題 --> 標記待寫段落
+    - 禁止本輪寫完全文或結語
   - |
-    優化現有代碼：
-    - 改進代碼結構
-    - 添加錯誤處理
-    - 補充註釋說明
+    打開 draft.md，從 <!-- CONTINUE --> 標記處接續創作：
+    - 本輪只寫下一個章節，約 400-600 字
+    - 語氣與前文一致，開頭 1-2 句自然銜接
+    - 更新 CONTINUE 標記指向下一段
+    - 禁止重寫已有段落，禁止一輪內完結全篇
   - |
-    完善項目文檔：
-    - 更新 README
-    - 添加使用範例
-    - 補充 API 說明
+    繼續擴寫 draft.md：補寫下一章節，或深化目前最薄弱的一段：
+    - 可先列出已完成章節與待寫章節（各一行）
+    - 本輪專注新增內容，不做全篇大改
+    - 若大綱仍有 2 章以上未寫，不要寫結語
+  - |
+    接續創作新的一節（案例、故事或論點展開）：
+    - 僅可微調前文銜接句（最多 2 句），不可整段重寫
+    - 本輪約 400-600 字，保持「進行中」草稿狀態
+    - 更新 CONTINUE 標記
 
 summary_prompt: |
-  請用繁體中文總結本輪工作（300字內）：
-  1. 完成了哪些功能
-  2. 主要改進點
-  3. 下一步建議
+  請用繁體中文總結本輪文章進度（200字內）：
+  1. 本輪寫了哪個章節、約多少字
+  2. 全文目前完成度（已完成/待寫章節）
+  3. 下一輪建議接寫哪一段
 """,
-    "codex.yaml": """# Codex 出廠範本
-task:
-  name: "通用任務"
-  description: "Codex 自動執行 - 可根據需求修改提示詞"
-  language: "繁體中文"
-  output_dir: output
-
+    "codex.yaml": """# Codex 出廠範本 · 連載文章創作（可搜尋補充資料）
+# 每輪只寫一小段，接續前稿繼續寫，不要一輪就寫完
 cli:
   tool: codex
   search: true
@@ -2670,33 +2628,57 @@ display:
   show_timestamp: true
 
 prompts:
-  - "繼續完成當前任務，並檢查是否有遺漏。"
-  - "優化並修復剛才的改動，補上必要測試。"
-  - "整理輸出與文檔，確保結果可直接使用。"
+  - |
+    在 output/articles/ 建立或打開研究型連載草稿 draft.md（已有則接寫）：
+    - 本輪：選定主題、列出 4-6 章大綱，搜尋 2-3 個可靠來源
+    - 撰寫開篇與第一章約 400-600 字，文末附「參考來源」小節
+    - 加上 <!-- CONTINUE: 下一章節標題 -->
+    - 一輪寫不完是正常流程，不要寫結語
+  - |
+    接續 draft.md：先搜尋本 chapter 需要的事實、數據或案例，再撰寫下一章約 400-600 字：
+    - 從 CONTINUE 標記處接寫，不重寫前文
+    - 新內容需與已寫段落邏輯連貫
+    - 更新 CONTINUE 標記與參考來源
+  - |
+    繼續擴寫：補寫下一章，或把某個論點寫深一層：
+    - 列出「已完成 / 待寫」章節各一行
+    - 本輪以新增段落為主，避免全篇重構
+    - 尚有 2 章以上未寫時，不要寫結語
+  - |
+    接續創作並補充佐證（搜尋引用、數據或對比例子）：
+    - 本輪約 400-600 字，只允許微調銜接句（最多 2 句）
+    - 保持草稿為連載進行中狀態
+    - 更新 CONTINUE 標記
 
-summary_prompt: "請用繁體中文總結本輪工作（300字內）。"
+summary_prompt: |
+  請用繁體中文總結本輪文章進度（200字內）：
+  1. 本輪新增哪一章、用了哪些資料來源
+  2. 全文完成度與待寫章節
+  3. 下一輪建議接寫方向
 """,
 }
 
 
 def _create_factory_templates(target_dir: Path) -> dict[str, list[str]]:
-    """Create built-in templates only when each file is missing."""
+    """Create or overwrite built-in factory templates."""
     target_dir.mkdir(parents=True, exist_ok=True)
     created: list[str] = []
-    skipped: list[str] = []
+    overwritten: list[str] = []
     errors: list[str] = []
     for filename, content in _FACTORY_SEED_CONFIGS.items():
         target = target_dir / filename
-        if target.is_file():
-            skipped.append(filename)
-            continue
+        existed = target.is_file()
         try:
             target.write_text(content, encoding="utf-8")
-            created.append(filename)
-            _main_logger.info("Created factory template: %s", target)
+            if existed:
+                overwritten.append(filename)
+                _main_logger.info("Overwrote factory template: %s", target)
+            else:
+                created.append(filename)
+                _main_logger.info("Created factory template: %s", target)
         except OSError as exc:
             errors.append(f"{filename}: {exc}")
-    return {"created": created, "skipped": skipped, "errors": errors}
+    return {"created": created, "overwritten": overwritten, "errors": errors}
 
 
 def init_config_dir(override: Optional[str] = None) -> Path:
@@ -3772,7 +3754,7 @@ def _register_config_api_routes(app: Any, jsonify: Any, request: Any) -> None:
             keys = list(parsed.keys())
             if len(keys) == 1 and isinstance(parsed[keys[0]], dict):
                 inner = parsed[keys[0]]
-                if any(k in inner for k in ("task", "cli", "execution", "prompts")):
+                if any(k in inner for k in ("cli", "execution", "prompts")):
                     parsed = inner
             return jsonify({"config": parsed})
         except ConfigError as exc:

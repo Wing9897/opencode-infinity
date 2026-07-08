@@ -87,10 +87,6 @@ python opencode_infinity.py --config-dir ./configs codex
 編輯設定檔範例：
 
 ```yaml
-task:
-  name: "我的任務"
-  language: "繁體中文"
-
 cli:
   tool: "codex"           # opencode / claude / codex / copilot
   model: ""               # 留空用預設，或指定如 openai/gpt-5.2-codex
