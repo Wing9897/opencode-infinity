@@ -9,6 +9,7 @@ a = Analysis(
     binaries=[],
     datas=[
         (str(ROOT / "gui"), "gui"),
+        (str(ROOT / "desktop" / "build-meta.json"), "."),
     ],
     hiddenimports=[
         "opencode_infinity",
@@ -16,15 +17,14 @@ a = Analysis(
         "werkzeug",
         "yaml",
         "webview",
-        "webview.platforms.winforms",
         "webview.platforms.edgechromium",
     ],
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
-    excludes=[],
+    excludes=["tkinter", "matplotlib", "numpy", "pandas", "PIL", "test", "tests"],
     noarchive=False,
-    optimize=0,
+    optimize=1,
 )
 
 pyz = PYZ(a.pure)

@@ -9,8 +9,6 @@ from __future__ import annotations
 # =============================================================================
 # 標準庫 imports
 # =============================================================================
-import itertools
-import random
 import socket
 import ctypes
 import json
@@ -216,114 +214,6 @@ def diff_mapping(
     }
 
 
-_SLUGIFY_RE: re.Pattern[str] = re.compile(r"[^\w\s-]")
-_SLUGIFY_WHITESPACE_RE: re.Pattern[str] = re.compile(r"[-\s]+")
-
-
-def slugify(text: str, *, lower: bool = True, separator: str = "-") -> str:
-    """Convert a string to a URL/filesystem-safe slug."""
-    result = _SLUGIFY_RE.sub("", text).strip()
-    result = _SLUGIFY_WHITESPACE_RE.sub(separator, result)
-    return result.lower() if lower else result
-
-
-def chunk_iterable(items: Iterable[object], size: int) -> list[list[object]]:
-    """Split an iterable into fixed-size chunks (last chunk may be smaller)."""
-    iterator = iter(items)
-    chunks: list[list[object]] = []
-    while True:
-        chunk = list(itertools.islice(iterator, size))
-        if not chunk:
-            break
-        chunks.append(chunk)
-    return chunks
-
-
-def format_bytes(n: int, *, decimal: bool = False) -> str:
-    """Format a byte count as a human-readable string (e.g. 1.5 KiB)."""
-    if decimal:
-        units = ("B", "KB", "MB", "GB", "TB", "PB")
-        divisor = 1000.0
-    else:
-        units = ("B", "KiB", "MiB", "GiB", "TiB", "PiB")
-        divisor = 1024.0
-    if n < divisor:
-        return f"{n} {units[0]}"
-    for unit in units[1:]:
-        n /= divisor
-        if abs(n) < divisor:
-            return f"{n:.1f} {unit}"
-    return f"{n:.1f} {units[-1]}"
-
-
-def merge_dicts_deep(*dicts: Mapping[str, object]) -> dict[str, object]:
-    """Deep-merge multiple dictionaries (later dicts override earlier ones)."""
-    result: dict[str, object] = {}
-    for d in dicts:
-        for key, value in d.items():
-            if (
-                key in result
-                and isinstance(result[key], dict)
-                and isinstance(value, dict)
-            ):
-                result[key] = merge_dicts_deep(result[key], value)
-            else:
-                result[key] = value
-    return result
-
-
-_ID_CHARS: str = "abcdefghijklmnopqrstuvwxyz0123456789"
-
-
-def generate_short_id(length: int = 8) -> str:
-    """Generate a short alphanumeric ID (not cryptographically secure)."""
-    return "".join(random.choice(_ID_CHARS) for _ in range(length))
-
-
-def ensure_dir(path: Path, *, mode: int = 0o755) -> Path:
-    """Ensure a directory exists and is writable; raise on failure."""
-    path.mkdir(parents=True, exist_ok=True)
-    if not path.is_dir():
-        raise OSError(f"Not a directory: {path}")
-    return path
-
-
-_DURATION_RE: re.Pattern[str] = re.compile(
-    r"(?:(\d+)\s*d(?:ays?)?\s*)?"
-    r"(?:(\d+)\s*h(?:ours?)?\s*)?"
-    r"(?:(\d+)\s*m(?:in(?:utes?)?)?\s*)?"
-    r"(?:(\d+)\s*s(?:ec(?:onds?)?)?\s*)?",
-    re.IGNORECASE,
-)
-
-
-def parse_duration(text: str, *, default: int = 0) -> int:
-    """Parse a human-readable duration string into seconds.
-
-    Supported formats: "1d", "2h30m", "45s", "1d 6h", "30m".
-    """
-    text = text.strip()
-    if not text:
-        return default
-    match = _DURATION_RE.fullmatch(text)
-    if not match:
-        return default
-    days, hours, minutes, seconds = (int(v) if v else 0 for v in match.groups())
-    return days * 86400 + hours * 3600 + minutes * 60 + seconds
-
-
-_INVALID_FILENAME_CHARS_RE: re.Pattern[str] = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
-
-
-def safe_filename(text: str, *, replacement: str = "_", max_length: int = 128) -> str:
-    """Strip or replace characters that are invalid in filenames."""
-    result = _INVALID_FILENAME_CHARS_RE.sub(replacement, text).strip()
-    result = _SLUGIFY_WHITESPACE_RE.sub(replacement, result)
-    if not result:
-        result = "untitled"
-    return result[:max_length].rstrip(". ")
-
-
 # =============================================================================
 # 資料模型 (models)
 # =============================================================================
@@ -382,7 +272,6 @@ class SanitizeResult:
     """Result of input sanitization check."""
 
     is_safe: bool
-    sanitized_text: str = ""
     rejection_reason: str = ""
 
 
@@ -440,9 +329,7 @@ class CLIAdapterError(OpenCodeInfinityError):
 
 
 class InputSanitizer:
-    """Validates and sanitizes user input before subprocess execution."""
-
-    SHELL_SPECIAL_CHARS: ClassVar[str] = r';&|$`(){}<>\'"' + "\\\n"
+    """Validates user input before subprocess execution."""
 
     DANGEROUS_PATTERNS: ClassVar[list[re.Pattern[str]]] = [
         re.compile(r";\s*rm\b"),
@@ -457,35 +344,14 @@ class InputSanitizer:
     ]
 
     def sanitize(self, input_text: str) -> SanitizeResult:
-        """Sanitize user input for safe subprocess execution."""
+        """Reject prompts that contain dangerous shell patterns."""
         for pattern in self.DANGEROUS_PATTERNS:
             match = pattern.search(input_text)
             if match:
                 reason = f"Dangerous pattern detected: '{match.group()}'"
                 self._emit_warning(input_text, reason)
-                return SanitizeResult(
-                    is_safe=False,
-                    sanitized_text="",
-                    rejection_reason=reason,
-                )
-        sanitized = self._escape_shell_chars(input_text)
-        return SanitizeResult(
-            is_safe=True,
-            sanitized_text=sanitized,
-            rejection_reason="",
-        )
-
-    def _escape_shell_chars(self, text: str) -> str:
-        """Escape shell special characters with backslash."""
-        result: list[str] = []
-        for char in text:
-            if char == "\n":
-                result.append("\\n")
-            elif char in self.SHELL_SPECIAL_CHARS:
-                result.append(f"\\{char}")
-            else:
-                result.append(char)
-        return "".join(result)
+                return SanitizeResult(is_safe=False, rejection_reason=reason)
+        return SanitizeResult(is_safe=True)
 
     def _emit_warning(self, input_text: str, reason: str) -> None:
         """Output a warning to stderr with timestamp and truncated input."""
@@ -1885,144 +1751,138 @@ class Executor:
             return sanitization_failure
 
         errors: list[RetryError] = []
-        temp_files: list[Path] = []
         resolved_command = self._resolve_command(command)
         stdin_bytes = stdin_input.encode("utf-8") if stdin_input else None
         last_stdout = ""
         last_stderr = ""
 
-        try:
-            for attempt in range(max_retries + 1):
-                attempt_timeout = self._calculate_backoff_timeout(timeout, attempt)
+        for attempt in range(max_retries + 1):
+            attempt_timeout = self._calculate_backoff_timeout(timeout, attempt)
 
-                try:
-                    if on_output_line is not None:
-                        return_code, last_stdout, last_stderr = (
-                            self._execute_once_streaming(
-                                resolved_command,
-                                attempt_timeout,
-                                stdin_input=stdin_bytes,
-                                on_output_line=on_output_line,
-                            )
-                        )
-                        result = subprocess.CompletedProcess(
-                            args=resolved_command,
-                            returncode=return_code,
-                            stdout=last_stdout.encode("utf-8", errors="replace"),
-                            stderr=last_stderr.encode("utf-8", errors="replace"),
-                        )
-                    else:
-                        result = self._execute_once(
-                            command=resolved_command,
-                            timeout=attempt_timeout,
+            try:
+                if on_output_line is not None:
+                    return_code, last_stdout, last_stderr = (
+                        self._execute_once_streaming(
+                            resolved_command,
+                            attempt_timeout,
                             stdin_input=stdin_bytes,
-                            temp_files=temp_files,
+                            on_output_line=on_output_line,
                         )
-                    last_stdout = self._decode_output(result.stdout)
-                    last_stderr = self._decode_output(result.stderr)
-                    if _evaluate_subprocess_success(
+                    )
+                    result = subprocess.CompletedProcess(
+                        args=resolved_command,
+                        returncode=return_code,
+                        stdout=last_stdout.encode("utf-8", errors="replace"),
+                        stderr=last_stderr.encode("utf-8", errors="replace"),
+                    )
+                else:
+                    result = self._execute_once(
+                        command=resolved_command,
+                        timeout=attempt_timeout,
+                        stdin_input=stdin_bytes,
+                    )
+                last_stdout = self._decode_output(result.stdout)
+                last_stderr = self._decode_output(result.stderr)
+                if _evaluate_subprocess_success(
+                    result.returncode, last_stdout, last_stderr
+                ):
+                    duration = time.monotonic() - start_time
+                    return ExecutionResult(
+                        success=True,
+                        return_code=0,
+                        duration_seconds=duration,
+                        retry_count=attempt,
+                        errors=errors,
+                        stdout_text=last_stdout,
+                        stderr_text=last_stderr,
+                    )
+
+                error = RetryError(
+                    attempt=attempt + 1,
+                    timestamp=utc_now_iso(),
+                    return_code=result.returncode,
+                    message=_subprocess_failure_message(
                         result.returncode, last_stdout, last_stderr
-                    ):
-                        duration = time.monotonic() - start_time
-                        return ExecutionResult(
-                            success=True,
-                            return_code=0,
-                            duration_seconds=duration,
-                            retry_count=attempt,
-                            errors=errors,
-                            stdout_text=last_stdout,
-                            stderr_text=last_stderr,
-                        )
-
-                    error = RetryError(
-                        attempt=attempt + 1,
-                        timestamp=utc_now_iso(),
-                        return_code=result.returncode,
-                        message=_subprocess_failure_message(
-                            result.returncode, last_stdout, last_stderr
-                        ),
+                    ),
+                )
+                errors.append(error)
+                _executor_logger.warning(
+                    "run_with_retry: attempt %d/%d failed, return_code=%d, command=%s",
+                    attempt + 1,
+                    max_retries + 1,
+                    result.returncode,
+                    command,
+                )
+                if on_output_line is not None:
+                    on_output_line(
+                        f"[retry] 第 {attempt + 1}/{max_retries + 1} 次嘗試失敗 "
+                        f"(exit code {result.returncode})"
                     )
-                    errors.append(error)
-                    _executor_logger.warning(
-                        "run_with_retry: attempt %d/%d failed, return_code=%d, command=%s",
-                        attempt + 1,
-                        max_retries + 1,
-                        result.returncode,
-                        command,
-                    )
-                    if on_output_line is not None:
-                        on_output_line(
-                            f"[retry] 第 {attempt + 1}/{max_retries + 1} 次嘗試失敗 "
-                            f"(exit code {result.returncode})"
-                        )
 
-                except subprocess.TimeoutExpired:
-                    error = RetryError(
-                        attempt=attempt + 1,
-                        timestamp=utc_now_iso(),
-                        exception_type="TimeoutExpired",
-                        message=f"Command timed out after {attempt_timeout}s",
+            except subprocess.TimeoutExpired:
+                error = RetryError(
+                    attempt=attempt + 1,
+                    timestamp=utc_now_iso(),
+                    exception_type="TimeoutExpired",
+                    message=f"Command timed out after {attempt_timeout}s",
+                )
+                errors.append(error)
+                _executor_logger.warning(
+                    "run_with_retry: attempt %d/%d timed out, timeout=%ds, command=%s",
+                    attempt + 1,
+                    max_retries + 1,
+                    attempt_timeout,
+                    command,
+                )
+                if on_output_line is not None:
+                    on_output_line(
+                        f"[timeout] 第 {attempt + 1}/{max_retries + 1} 次嘗試逾時 "
+                        f"({attempt_timeout}s 無回應)"
                     )
-                    errors.append(error)
-                    _executor_logger.warning(
-                        "run_with_retry: attempt %d/%d timed out, timeout=%ds, command=%s",
-                        attempt + 1,
-                        max_retries + 1,
-                        attempt_timeout,
-                        command,
+
+            except OSError as exc:
+                error = RetryError(
+                    attempt=attempt + 1,
+                    timestamp=utc_now_iso(),
+                    exception_type=type(exc).__name__,
+                    message=str(exc),
+                )
+                errors.append(error)
+                _executor_logger.error(
+                    "run_with_retry: attempt %d/%d raised %s: %s, command=%s",
+                    attempt + 1,
+                    max_retries + 1,
+                    type(exc).__name__,
+                    exc,
+                    command,
+                )
+                if on_output_line is not None:
+                    on_output_line(
+                        f"[error] 第 {attempt + 1}/{max_retries + 1} 次嘗試發生錯誤: "
+                        f"{type(exc).__name__}: {exc}"
                     )
-                    if on_output_line is not None:
-                        on_output_line(
-                            f"[timeout] 第 {attempt + 1}/{max_retries + 1} 次嘗試逾時 "
-                            f"({attempt_timeout}s 無回應)"
-                        )
 
-                except OSError as exc:
-                    error = RetryError(
-                        attempt=attempt + 1,
-                        timestamp=utc_now_iso(),
-                        exception_type=type(exc).__name__,
-                        message=str(exc),
-                    )
-                    errors.append(error)
-                    _executor_logger.error(
-                        "run_with_retry: attempt %d/%d raised %s: %s, command=%s",
-                        attempt + 1,
-                        max_retries + 1,
-                        type(exc).__name__,
-                        exc,
-                        command,
-                    )
-                    if on_output_line is not None:
-                        on_output_line(
-                            f"[error] 第 {attempt + 1}/{max_retries + 1} 次嘗試發生錯誤: "
-                            f"{type(exc).__name__}: {exc}"
-                        )
+            if attempt < max_retries:
+                backoff_wait = min(min(2**attempt, _MAX_BACKOFF_SECONDS), 10)
+                if on_output_line is not None:
+                    on_output_line(f"[retry] {backoff_wait}s 後重試...")
+                time.sleep(backoff_wait)
 
-                if attempt < max_retries:
-                    backoff_wait = min(min(2**attempt, _MAX_BACKOFF_SECONDS), 10)
-                    if on_output_line is not None:
-                        on_output_line(f"[retry] {backoff_wait}s 後重試...")
-                    time.sleep(backoff_wait)
-
-            duration = time.monotonic() - start_time
-            final_return_code = (
-                errors[-1].return_code
-                if errors and errors[-1].return_code is not None
-                else -1
-            )
-            return ExecutionResult(
-                success=False,
-                return_code=final_return_code,
-                duration_seconds=duration,
-                retry_count=max_retries,
-                errors=errors,
-                stdout_text=last_stdout,
-                stderr_text=last_stderr,
-            )
-
-        finally:
-            self._cleanup_temp_files(temp_files)
+        duration = time.monotonic() - start_time
+        final_return_code = (
+            errors[-1].return_code
+            if errors and errors[-1].return_code is not None
+            else -1
+        )
+        return ExecutionResult(
+            success=False,
+            return_code=final_return_code,
+            duration_seconds=duration,
+            retry_count=max_retries,
+            errors=errors,
+            stdout_text=last_stdout,
+            stderr_text=last_stderr,
+        )
 
     def run_with_popen(
         self,
@@ -2030,15 +1890,12 @@ class Executor:
         timeout: int,
         stdin_input: Optional[str] = None,
         prompt: Optional[str] = None,
-        capture_output: bool = False,
         on_output_line: Optional[Callable[[str], None]] = None,
     ) -> ExecutionResult:
         """Execute a command using Popen for stdin pipe support.
 
-        When capture_output=False (default), stdout/stderr are inherited from
-        the terminal so the user sees real-time output from the subprocess.
-        When on_output_line is set, output is streamed to the callback instead.
-        When capture_output=True, output is captured into ExecutionResult fields.
+        When on_output_line is set, output is streamed to the callback.
+        Otherwise stdout/stderr are inherited from the terminal.
         """
         start_time = time.monotonic()
         validation_error = self._validate_invocation(command, timeout, 0)
@@ -2055,122 +1912,17 @@ class Executor:
         if sanitization_failure is not None:
             return sanitization_failure
 
-        temp_files: list[Path] = []
         stdin_bytes = stdin_input.encode("utf-8") if stdin_input else None
 
-        try:
-            if on_output_line is not None:
-                try:
-                    return_code, stdout_text, stderr_text = (
-                        self._execute_once_streaming(
-                            self._resolve_command(command),
-                            timeout,
-                            stdin_input=stdin_bytes,
-                            on_output_line=on_output_line,
-                        )
-                    )
-                except subprocess.TimeoutExpired:
-                    duration = time.monotonic() - start_time
-                    return ExecutionResult(
-                        success=False,
-                        return_code=-1,
-                        duration_seconds=duration,
-                        retry_count=0,
-                        errors=[
-                            RetryError(
-                                attempt=1,
-                                timestamp=utc_now_iso(),
-                                exception_type="TimeoutExpired",
-                                message=f"Command timed out after {timeout}s",
-                            )
-                        ],
-                    )
-                duration = time.monotonic() - start_time
-                success = _evaluate_subprocess_success(
-                    return_code, stdout_text, stderr_text
-                )
-                return ExecutionResult(
-                    success=success,
-                    return_code=return_code,
-                    duration_seconds=duration,
-                    retry_count=0,
-                    errors=(
-                        []
-                        if success
-                        else [
-                            RetryError(
-                                attempt=1,
-                                timestamp=utc_now_iso(),
-                                return_code=return_code,
-                                message=_subprocess_failure_message(
-                                    return_code, stdout_text, stderr_text
-                                ),
-                            )
-                        ]
-                    ),
-                    stdout_text=stdout_text,
-                    stderr_text=stderr_text,
-                )
-
-            process: Optional[subprocess.Popen[bytes]] = None
+        if on_output_line is not None:
             try:
-                resolved_command = self._resolve_command(command)
-                process = subprocess.Popen(
-                    resolved_command,
-                    stdin=subprocess.PIPE if stdin_input else subprocess.DEVNULL,
-                    stdout=subprocess.PIPE if capture_output else None,
-                    stderr=subprocess.PIPE if capture_output else None,
-                    shell=False,
-                    cwd=self._subprocess_cwd(),
-                    env=_subprocess_env_for_command(resolved_command),
-                    creationflags=get_creation_flags(),
+                return_code, stdout_text, stderr_text = self._execute_once_streaming(
+                    self._resolve_command(command),
+                    timeout,
+                    stdin_input=stdin_bytes,
+                    on_output_line=on_output_line,
                 )
-                if capture_output:
-                    stdout_data, stderr_data = process.communicate(
-                        input=stdin_bytes, timeout=timeout
-                    )
-                else:
-                    # Write stdin then wait — output goes directly to terminal
-                    if stdin_bytes and process.stdin:
-                        process.stdin.write(stdin_bytes)
-                        process.stdin.close()
-                    process.wait(timeout=timeout)
-                    stdout_data, stderr_data = b"", b""
-                duration = time.monotonic() - start_time
-                stdout_text = self._decode_output(stdout_data)
-                stderr_text = self._decode_output(stderr_data)
-                return_code = (
-                    process.returncode if process.returncode is not None else -1
-                )
-                success = _evaluate_subprocess_success(
-                    return_code, stdout_text, stderr_text
-                )
-                return ExecutionResult(
-                    success=success,
-                    return_code=return_code,
-                    duration_seconds=duration,
-                    retry_count=0,
-                    errors=(
-                        []
-                        if success
-                        else [
-                            RetryError(
-                                attempt=1,
-                                timestamp=utc_now_iso(),
-                                return_code=return_code,
-                                message=_subprocess_failure_message(
-                                    return_code, stdout_text, stderr_text
-                                ),
-                            )
-                        ]
-                    ),
-                    stdout_text=self._decode_output(stdout_data),
-                    stderr_text=stderr_text,
-                )
-
             except subprocess.TimeoutExpired:
-                if process is not None:
-                    terminate_process(process)
                 duration = time.monotonic() - start_time
                 return ExecutionResult(
                     success=False,
@@ -2186,32 +1938,110 @@ class Executor:
                         )
                     ],
                 )
-
-            except OSError as exc:
-                _executor_logger.error(
-                    "run_with_popen: %s: %s, command=%s",
-                    type(exc).__name__,
-                    exc,
-                    command,
-                )
-                duration = time.monotonic() - start_time
-                return ExecutionResult(
-                    success=False,
-                    return_code=-1,
-                    duration_seconds=duration,
-                    retry_count=0,
-                    errors=[
+            duration = time.monotonic() - start_time
+            success = _evaluate_subprocess_success(
+                return_code, stdout_text, stderr_text
+            )
+            return ExecutionResult(
+                success=success,
+                return_code=return_code,
+                duration_seconds=duration,
+                retry_count=0,
+                errors=(
+                    []
+                    if success
+                    else [
                         RetryError(
                             attempt=1,
                             timestamp=utc_now_iso(),
-                            exception_type=type(exc).__name__,
-                            message=str(exc),
+                            return_code=return_code,
+                            message=_subprocess_failure_message(
+                                return_code, stdout_text, stderr_text
+                            ),
                         )
-                    ],
-                )
+                    ]
+                ),
+                stdout_text=stdout_text,
+                stderr_text=stderr_text,
+            )
 
-        finally:
-            self._cleanup_temp_files(temp_files)
+        process: Optional[subprocess.Popen[bytes]] = None
+        try:
+            resolved_command = self._resolve_command(command)
+            process = subprocess.Popen(
+                resolved_command,
+                stdin=subprocess.PIPE if stdin_input else subprocess.DEVNULL,
+                stdout=None,
+                stderr=None,
+                shell=False,
+                cwd=self._subprocess_cwd(),
+                env=_subprocess_env_for_command(resolved_command),
+                creationflags=get_creation_flags(),
+            )
+            if stdin_bytes and process.stdin:
+                process.stdin.write(stdin_bytes)
+                process.stdin.close()
+            process.wait(timeout=timeout)
+            duration = time.monotonic() - start_time
+            return_code = process.returncode if process.returncode is not None else -1
+            return ExecutionResult(
+                success=return_code == 0,
+                return_code=return_code,
+                duration_seconds=duration,
+                retry_count=0,
+                errors=(
+                    []
+                    if return_code == 0
+                    else [
+                        RetryError(
+                            attempt=1,
+                            timestamp=utc_now_iso(),
+                            return_code=return_code,
+                            message=f"Command exited with code {return_code}",
+                        )
+                    ]
+                ),
+            )
+        except subprocess.TimeoutExpired:
+            if process is not None:
+                terminate_process(process)
+            duration = time.monotonic() - start_time
+            return ExecutionResult(
+                success=False,
+                return_code=-1,
+                duration_seconds=duration,
+                retry_count=0,
+                errors=[
+                    RetryError(
+                        attempt=1,
+                        timestamp=utc_now_iso(),
+                        exception_type="TimeoutExpired",
+                        message=f"Command timed out after {timeout}s",
+                    )
+                ],
+            )
+        except OSError as exc:
+            _executor_logger.error(
+                "run_with_popen: %s: %s, command=%s",
+                type(exc).__name__,
+                exc,
+                command,
+            )
+            duration = time.monotonic() - start_time
+            return ExecutionResult(
+                success=False,
+                return_code=-1,
+                duration_seconds=duration,
+                retry_count=0,
+                errors=[
+                    RetryError(
+                        attempt=1,
+                        timestamp=utc_now_iso(),
+                        exception_type=type(exc).__name__,
+                        message=str(exc),
+                    )
+                ],
+            )
 
     # --- Private helpers ---
 
@@ -2286,7 +2116,6 @@ class Executor:
         command: list[str],
         timeout: int,
         stdin_input: Optional[bytes] = None,
-        temp_files: Optional[list[Path]] = None,
     ) -> subprocess.CompletedProcess[bytes]:
         # DEVNULL stdin prevents CLI tools from blocking on interactive input,
         # and avoids invalid inherited handles in windowed (no-console) builds.
@@ -2389,24 +2218,6 @@ class Executor:
     def _calculate_backoff_timeout(self, base_timeout: int, attempt: int) -> int:
         backoff_timeout: int = base_timeout * (2**attempt)
         return min(backoff_timeout, _MAX_BACKOFF_SECONDS)
-
-    def _cleanup_temp_files(self, temp_files: list[Path]) -> None:
-        for temp_path in temp_files:
-            self._safe_delete(temp_path)
-
-    @staticmethod
-    def _safe_delete(path: Path) -> None:
-        try:
-            path.unlink()
-        except FileNotFoundError:
-            pass
-        except OSError as exc:
-            _executor_logger.debug(
-                "_safe_delete: failed to delete %s: %s: %s",
-                path,
-                type(exc).__name__,
-                exc,
-            )
 
 
 # =============================================================================
@@ -2741,6 +2552,115 @@ def _self_tool_directory_warning(path: Path) -> Optional[str]:
     return None
 
 
+def _load_build_meta() -> dict[str, str]:
+    """Return build metadata bundled with desktop exe or local dev defaults."""
+    candidates = [
+        _app_root() / "build-meta.json",
+        Path(__file__).resolve().parent / "desktop" / "build-meta.json",
+    ]
+    for meta_path in candidates:
+        if meta_path.is_file():
+            try:
+                data = json.loads(meta_path.read_text(encoding="utf-8"))
+                if isinstance(data, dict):
+                    return {
+                        "version": str(data.get("version", "dev")),
+                        "sha": str(data.get("sha", "")),
+                    }
+            except (OSError, json.JSONDecodeError):
+                continue
+    return {"version": "dev", "sha": ""}
+
+
+def _app_build_info() -> dict[str, str]:
+    meta = _load_build_meta()
+    meta["mode"] = "desktop" if getattr(sys, "frozen", False) else "source"
+    return meta
+
+
+_desktop_self_check_cache: Optional[list[str]] = None
+
+
+def _desktop_self_check() -> list[str]:
+    """Run lightweight environment checks for frozen desktop builds."""
+    global _desktop_self_check_cache
+    if _desktop_self_check_cache is not None:
+        return _desktop_self_check_cache
+
+    issues: list[str] = []
+    if not getattr(sys, "frozen", False):
+        _desktop_self_check_cache = issues
+        return issues
+
+    _ensure_windows_user_path()
+    opencode = _find_cli_tool("opencode")
+    if opencode is None:
+        issues.append("找不到 opencode CLI（請 npm i -g opencode-ai 後重啟桌面版）")
+    else:
+        caps = _probe_opencode_cli(opencode)
+        _desktop_log(f"Self-check: OpenCode {caps.version} ({caps.headless_mode})")
+    for key in _OPENCODE_DESKTOP_ENV_KEYS:
+        if os.environ.get(key):
+            issues.append(
+                f"偵測到 {key}（與 OpenCode Desktop 可能衝突，執行時會自動清除）"
+            )
+    _desktop_self_check_cache = issues
+    return issues
+
+
+@dataclass
+class _RuntimeBootstrap:
+    """Shared runtime objects for CLI and GUI execution loops."""
+
+    config_path: Path
+    config_loader: "ConfigLoader"
+    config: AppConfig
+    working_dir: Optional[Path]
+    adapter: CLIAdapter
+    executor: Executor
+    session_manager: SessionManager
+
+
+def _bootstrap_runtime(
+    config_name: str,
+    *,
+    working_dir_override: Optional[str] = None,
+) -> _RuntimeBootstrap:
+    """Load config and construct adapter/executor/session manager."""
+    config_path = _resolve_config_path(config_name)
+    config_loader = ConfigLoader(config_path)
+    config = config_loader.load()
+    working_dir = _resolve_execution_working_dir(
+        config, override=working_dir_override
+    )
+    adapter = create_adapter(config.cli.tool, config.cli)
+    executor = Executor(working_dir=working_dir)
+    session_manager = SessionManager(adapter, executor, config)
+    return _RuntimeBootstrap(
+        config_path=config_path,
+        config_loader=config_loader,
+        config=config,
+        working_dir=working_dir,
+        adapter=adapter,
+        executor=executor,
+        session_manager=session_manager,
+    )
+
+
+def _log_opencode_adapter_info(
+    adapter: CLIAdapter, log: Callable[[str], None]
+) -> None:
+    if not isinstance(adapter, OpenCodeAdapter):
+        return
+    caps = adapter.capabilities
+    log(f"🔧 OpenCode: {adapter._executable}")
+    log(f"   版本: {caps.version}")
+    if caps.supports_auto:
+        log("   無人值守: run --auto")
+    else:
+        log("   無人值守: OPENCODE_PERMISSION（此版本不支援 --auto）")
+
+
 def _get_user_config_dir() -> Path:
     """Return the cross-platform user config directory."""
     if sys.platform == "win32":
@@ -3047,6 +2967,27 @@ def _format_elapsed_time(seconds: float) -> str:
     return f"{hours}小時{minutes}分鐘"
 
 
+def _format_run_summary(
+    *,
+    round_count: int,
+    success_count: int,
+    fail_count: int,
+    session_count: int,
+    elapsed_seconds: float,
+    title: str,
+) -> str:
+    elapsed_str = _format_elapsed_time(elapsed_seconds)
+    total = success_count + fail_count
+    success_rate = f"{success_count}/{total}" if total > 0 else "0/0"
+    return (
+        f"{title}\n"
+        f"  總執行輪次: {round_count}\n"
+        f"  成功/失敗: {success_rate}\n"
+        f"  Session 數量: {session_count}\n"
+        f"  總耗時: {elapsed_str}"
+    )
+
+
 class _MainLoopState:
     """Mutable state for the main execution loop."""
 
@@ -3058,7 +2999,6 @@ class _MainLoopState:
         self.session_count: int = 1
         self.start_time: float = time.monotonic()
         self.current_session_id: str = ""
-        self.executor: Optional[Executor] = None
 
 
 _state: _MainLoopState = _MainLoopState()
@@ -3069,16 +3009,17 @@ def _sigint_handler(signum: int, frame: Optional[FrameType]) -> None:
     _state.running = False
     elapsed = time.monotonic() - _state.start_time
     elapsed_str = _format_elapsed_time(elapsed)
-    total = _state.success_count + _state.fail_count
-    success_rate = f"{_state.success_count}/{total}" if total > 0 else "0/0"
-
+    summary = _format_run_summary(
+        round_count=_state.round_count,
+        success_count=_state.success_count,
+        fail_count=_state.fail_count,
+        session_count=_state.session_count,
+        elapsed_seconds=elapsed,
+        title="OpenCode Infinity - 執行統計",
+    )
     print(file=sys.stderr)
     print("=" * 50, file=sys.stderr)
-    print("OpenCode Infinity - 執行統計", file=sys.stderr)
-    print(f"  總執行輪次: {_state.round_count}", file=sys.stderr)
-    print(f"  成功/失敗: {success_rate}", file=sys.stderr)
-    print(f"  Session 數量: {_state.session_count}", file=sys.stderr)
-    print(f"  總耗時: {elapsed_str}", file=sys.stderr)
+    print(summary, file=sys.stderr)
     print("=" * 50, file=sys.stderr)
     sys.exit(0)
 
@@ -3547,11 +3488,9 @@ def _run(args: Optional[list[str]] = None) -> None:
 
     resolved_config_path: str = "<unresolved>"
     try:
-        config_path = _resolve_config_path(config_name)
-        resolved_config_path = str(config_path)
-        config_loader = ConfigLoader(config_path)
-        config = config_loader.load()
-    except (ConfigError, OSError, ValueError) as exc:
+        runtime = _bootstrap_runtime(config_name)
+        resolved_config_path = str(runtime.config_path)
+    except (ConfigError, OSError, ValueError, CLIAdapterError) as exc:
         print(
             f"ERROR: Failed to load config '{resolved_config_path}': {exc}",
             file=sys.stderr,
@@ -3564,23 +3503,16 @@ def _run(args: Optional[list[str]] = None) -> None:
         )
         sys.exit(1)
 
+    config = runtime.config
+    config_loader = runtime.config_loader
+    adapter = runtime.adapter
+    executor = runtime.executor
+    session_manager = runtime.session_manager
+    working_dir = runtime.working_dir
+
     app_logger.info(
-        "Config loaded: tool=%s, config_path=%s", config.cli.tool, config_path
+        "Config loaded: tool=%s, config_path=%s", config.cli.tool, runtime.config_path
     )
-
-    try:
-        adapter = create_adapter(config.cli.tool, config.cli)
-    except ValueError as exc:
-        print(f"ERROR: {exc}", file=sys.stderr)
-        app_logger.error("_run: adapter creation failed: %s", exc)
-        sys.exit(1)
-
-    try:
-        working_dir = _resolve_execution_working_dir(config)
-    except ConfigError as exc:
-        print(f"ERROR: {exc}", file=sys.stderr)
-        app_logger.error("_run: invalid working_dir: %s", exc)
-        sys.exit(1)
 
     tool_warning = _self_tool_directory_warning(working_dir) if working_dir else None
     if tool_warning:
@@ -3589,11 +3521,7 @@ def _run(args: Optional[list[str]] = None) -> None:
     if working_dir:
         app_logger.info("CLI working directory: %s", working_dir)
 
-    executor = Executor(working_dir=working_dir)
-    session_manager = SessionManager(adapter, executor, config)
-
     _state.current_session_id = session_id
-    _state.executor = executor
     _state.start_time = time.monotonic()
 
     signal.signal(signal.SIGINT, _sigint_handler)
@@ -3652,17 +3580,17 @@ def _run(args: Optional[list[str]] = None) -> None:
     session_id = stats.session_id
 
     elapsed = time.monotonic() - _state.start_time
-    elapsed_str = _format_elapsed_time(elapsed)
-    total = _state.success_count + _state.fail_count
-    success_rate = f"{_state.success_count}/{total}" if total > 0 else "0/0"
-
+    summary = _format_run_summary(
+        round_count=_state.round_count,
+        success_count=_state.success_count,
+        fail_count=_state.fail_count,
+        session_count=_state.session_count,
+        elapsed_seconds=elapsed,
+        title="OpenCode Infinity - 執行完成",
+    )
     print(file=sys.stderr)
     print("=" * 50, file=sys.stderr)
-    print("OpenCode Infinity - 執行完成", file=sys.stderr)
-    print(f"  總執行輪次: {_state.round_count}", file=sys.stderr)
-    print(f"  成功/失敗: {success_rate}", file=sys.stderr)
-    print(f"  Session 數量: {_state.session_count}", file=sys.stderr)
-    print(f"  總耗時: {elapsed_str}", file=sys.stderr)
+    print(summary, file=sys.stderr)
     print("=" * 50, file=sys.stderr)
 
 
@@ -3766,38 +3694,13 @@ def _gui_run_task(
 
     try:
         try:
-            _ensure_windows_user_path()
-            config_path = _resolve_config_path(config_name)
-            _gui_log(f"📄 讀取設定: {config_path}")
-            config_loader = ConfigLoader(config_path)
-            config = config_loader.load()
+            runtime = _bootstrap_runtime(
+                config_name, working_dir_override=working_dir_override
+            )
         except (ConfigError, OSError, ValueError) as exc:
             _gui_log(f"❌ 設定載入失敗: {exc}")
             return
-
-        _gui_log(f"✅ 設定載入成功: tool={config.cli.tool}")
-
-        try:
-            working_dir = _resolve_execution_working_dir(
-                config, override=working_dir_override
-            )
-        except ConfigError as exc:
-            _gui_log(f"❌ 工作目錄無效: {exc}")
-            return
-
-        tool_warning = (
-            _self_tool_directory_warning(working_dir) if working_dir else None
-        )
-        if tool_warning:
-            _gui_log(f"⚠️ {tool_warning}")
-        if working_dir:
-            _gui_log(f"📁 工作目錄: {working_dir}")
-        else:
-            _gui_log(f"📁 工作目錄: {Path.cwd()}（沿用啟動目錄）")
-
-        try:
-            adapter = create_adapter(config.cli.tool, config.cli)
-        except (ValueError, CLIAdapterError) as exc:
+        except CLIAdapterError as exc:
             _gui_log(f"❌ CLI 適配器建立失敗: {exc}")
             if sys.platform == "win32":
                 _gui_log(
@@ -3806,19 +3709,29 @@ def _gui_run_task(
                 )
             return
 
-        if isinstance(adapter, OpenCodeAdapter):
-            caps = adapter.capabilities
-            _gui_log(f"🔧 OpenCode: {adapter._executable}")
-            _gui_log(f"   版本: {caps.version}")
-            if caps.supports_auto:
-                _gui_log("   無人值守: run --auto")
-            else:
-                _gui_log(
-                    "   無人值守: OPENCODE_PERMISSION（此版本不支援 --auto）"
-                )
+        _gui_log(f"📄 讀取設定: {runtime.config_path}")
+        _gui_log(f"✅ 設定載入成功: tool={runtime.config.tool}")
 
-        executor = Executor(working_dir=working_dir)
-        session_manager = SessionManager(adapter, executor, config)
+        tool_warning = (
+            _self_tool_directory_warning(runtime.working_dir)
+            if runtime.working_dir
+            else None
+        )
+        if tool_warning:
+            _gui_log(f"⚠️ {tool_warning}")
+        if runtime.working_dir:
+            _gui_log(f"📁 工作目錄: {runtime.working_dir}")
+        else:
+            _gui_log(f"📁 工作目錄: {Path.cwd()}（沿用啟動目錄）")
+
+        _log_opencode_adapter_info(runtime.adapter, _gui_log)
+
+        config_loader = runtime.config_loader
+        config = runtime.config
+        adapter = runtime.adapter
+        executor = runtime.executor
+        session_manager = runtime.session_manager
+        working_dir = runtime.working_dir
         loop_logger = logging.getLogger("opencode_infinity.gui_loop")
 
         def _sync_gui_state(loop_stats: _ExecutionLoopStats) -> None:
@@ -4115,6 +4028,7 @@ def _register_runtime_api_routes(
 
     @app.route("/api/status")
     def api_status():
+        build_info = _app_build_info()
         with _gui_state_lock:
             running = _gui_state["running"]
             start_time = _gui_state["start_time"]
@@ -4128,6 +4042,9 @@ def _register_runtime_api_routes(
                 "config_name": _gui_state["config_name"],
                 "session_id": _gui_state["session_id"],
                 "working_dir": _gui_state.get("working_dir", ""),
+                "app_version": build_info["version"],
+                "build_mode": build_info["mode"],
+                "self_check": _desktop_self_check(),
             }
         minutes = int(elapsed_seconds) // 60
         seconds = int(elapsed_seconds) % 60
@@ -4257,17 +4174,17 @@ def _start_desktop(*, port: int = DEFAULT_DESKTOP_PORT) -> None:
         if not gui_index.is_file():
             raise ConfigError(f"找不到 GUI 資源: {gui_index}")
 
-        _create_flask_app()
+        build_info = _app_build_info()
         config_dir = get_tasks_config_dir()
         port = _pick_listen_port(port)
         timeout = 30.0 if getattr(sys, "frozen", False) else 10.0
 
         _desktop_log(
-            f"Starting desktop GUI on http://127.0.0.1:{port} (config: {config_dir})"
+            f"Starting desktop GUI v{build_info['version']} on "
+            f"http://127.0.0.1:{port} (config: {config_dir})"
         )
-        _eprint("OpenCode Infinity Desktop GUI starting...")
-        _eprint(f"   http://127.0.0.1:{port}")
-        _eprint(f"   Config dir: {config_dir}")
+        for issue in _desktop_self_check():
+            _desktop_log(f"Self-check warning: {issue}")
 
         _suppress_werkzeug_logs()
         server = _start_flask_background(port)
@@ -4293,6 +4210,28 @@ def _start_desktop(*, port: int = DEFAULT_DESKTOP_PORT) -> None:
     finally:
         if server is not None:
             server.shutdown()
+
+
+def desktop_main(argv: Optional[list[str]] = None) -> None:
+    """Entry point for PyInstaller desktop builds."""
+    _configure_stdio_encoding()
+    args = argv if argv is not None else sys.argv[1:]
+    try:
+        positional, options = _parse_launch_options(args)
+    except ConfigError as exc:
+        _show_fatal_error("OpenCode Infinity", str(exc))
+        raise SystemExit(1) from exc
+
+    if positional:
+        _show_fatal_error(
+            "OpenCode Infinity",
+            f"Unexpected arguments: {' '.join(positional)}",
+        )
+        raise SystemExit(1)
+
+    init_config_dir(options.config_dir)
+    port = options.port if options.port_explicit else DEFAULT_DESKTOP_PORT
+    _start_desktop(port=port)
 
 
 if __name__ == "__main__":

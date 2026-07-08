@@ -7,58 +7,6 @@ const LOG_MAX_LINES_FULL = 40;
 const LOG_MAX_LINES_COMPACT = 8;
 const LOG_COMPACT_MAX_CHARS = 140;
 
-function debounce(fn, delay) {
-    let timer = null;
-    return function (...args) {
-        clearTimeout(timer);
-        timer = setTimeout(() => fn.apply(this, args), delay);
-    };
-}
-
-function throttle(fn, limit) {
-    let inThrottle = false;
-    return function (...args) {
-        if (!inThrottle) {
-            fn.apply(this, args);
-            inThrottle = true;
-            setTimeout(() => { inThrottle = false; }, limit);
-        }
-    };
-}
-
-function formatBytes(bytes, decimal) {
-    if (bytes === 0) return '0 B';
-    const base = decimal ? 1000 : 1024;
-    const units = decimal
-        ? ['B', 'KB', 'MB', 'GB', 'TB']
-        : ['B', 'KiB', 'MiB', 'GiB', 'TiB'];
-    const i = Math.floor(Math.log(bytes) / Math.log(base));
-    const idx = Math.min(i, units.length - 1);
-    return parseFloat((bytes / Math.pow(base, idx)).toFixed(1)) + ' ' + units[idx];
-}
-
-function slugify(text) {
-    return text
-        .toLowerCase()
-        .trim()
-        .replace(/[^\w\s-]/g, '')
-        .replace(/[-\s]+/g, '-');
-}
-
-function escapeHtml(str) {
-    const div = document.createElement('div');
-    div.appendChild(document.createTextNode(str));
-    return div.innerHTML;
-}
-
-function pluralize(count, singular, plural) {
-    return count === 1 ? singular : (plural || singular + 's');
-}
-
-function clamp(value, min, max) {
-    return Math.min(Math.max(value, min), max);
-}
-
 function showToast(message, type) {
     const root = document.getElementById('toast-root');
     const toast = document.createElement('div');
@@ -189,6 +137,8 @@ const statusConfig = document.getElementById('status-config');
 let eventSource = null;
 let statusInterval = null;
 let appRunning = false;
+let buildVersionLabel = '';
+let selfCheckShown = false;
 let appConnected = false;
 let logAutoScroll = true;
 let logCompactMode = localStorage.getItem(STORAGE_KEY_LOG_COMPACT) !== '0';
@@ -205,6 +155,10 @@ function updateAppStatusBadge() {
         statusConfig.hidden = false;
         statusConfig.textContent = activeConfigName;
         statusConfig.title = t('statusRunningConfig', { name: activeConfigName });
+    } else if (buildVersionLabel) {
+        statusConfig.hidden = false;
+        statusConfig.textContent = buildVersionLabel;
+        statusConfig.title = '';
     } else {
         statusConfig.hidden = true;
         statusConfig.textContent = '';
@@ -574,6 +528,14 @@ function stopElapsedTicker() {
 
 function updateStatus() {
     apiFetch('/api/status').then((data) => {
+        if (data.app_version) {
+            const prefix = data.build_mode === 'desktop' ? 'exe' : 'src';
+            buildVersionLabel = prefix + ' ' + data.app_version;
+        }
+        if (!selfCheckShown && Array.isArray(data.self_check) && data.self_check.length) {
+            data.self_check.forEach((msg) => addLog('⚠️ ' + msg));
+            selfCheckShown = true;
+        }
         document.getElementById('stat-rounds').textContent = data.round_count || 0;
         document.getElementById('stat-sessions').textContent = data.session_count || 0;
         // Keep client-side ticker authoritative while running to avoid UI freezes

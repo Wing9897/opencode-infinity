@@ -287,6 +287,23 @@ class SmokeTests(unittest.TestCase):
             self.assertIn("codex.yaml", client.get("/api/configs").get_json()["configs"])
             self.assertFalse(client.get("/api/status").get_json()["running"])
 
+    def test_api_status_includes_build_info(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            self.mod.init_config_dir(tmp)
+            client = self.mod._create_flask_app().test_client()
+            payload = client.get("/api/status").get_json()
+            self.assertIn("app_version", payload)
+            self.assertIn("build_mode", payload)
+            self.assertIn("self_check", payload)
+            self.assertIsInstance(payload["self_check"], list)
+
+    def test_bootstrap_runtime_loads_config(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            config_dir = self._init_with_templates(tmp)
+            runtime = self.mod._bootstrap_runtime("codex.yaml")
+            self.assertEqual(runtime.config.cli.tool, "codex")
+            self.assertTrue(runtime.config_path.is_file())
+
     def test_resolve_execution_working_dir_from_yaml(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             config_path = Path(tmp) / "codex.yaml"
