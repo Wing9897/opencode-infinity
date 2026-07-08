@@ -26,6 +26,7 @@ import threading
 import time
 import webbrowser
 from abc import ABC, abstractmethod
+from collections import deque
 from collections.abc import Callable, Iterable, Mapping
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
@@ -1638,7 +1639,11 @@ def terminate_process(process: subprocess.Popen[Any]) -> None:
 def get_creation_flags() -> int:
     """Return platform-appropriate subprocess creation flags."""
     if IS_WINDOWS:
-        return 0x00000200  # CREATE_NEW_PROCESS_GROUP
+        flags = 0x00000200  # CREATE_NEW_PROCESS_GROUP
+        if getattr(sys, "frozen", False):
+            # Windowed exe has no console; prevent child console windows.
+            flags |= 0x08000000  # CREATE_NO_WINDOW
+        return flags
     return 0
 
 
@@ -1802,6 +1807,11 @@ class Executor:
                         result.returncode,
                         command,
                     )
+                    if on_output_line is not None:
+                        on_output_line(
+                            f"[retry] 第 {attempt + 1}/{max_retries + 1} 次嘗試失敗 "
+                            f"(exit code {result.returncode})"
+                        )
 
                 except subprocess.TimeoutExpired:
                     error = RetryError(
@@ -1818,6 +1828,11 @@ class Executor:
                         attempt_timeout,
                         command,
                     )
+                    if on_output_line is not None:
+                        on_output_line(
+                            f"[timeout] 第 {attempt + 1}/{max_retries + 1} 次嘗試逾時 "
+                            f"({attempt_timeout}s 無回應)"
+                        )
 
                 except OSError as exc:
                     error = RetryError(
@@ -1835,10 +1850,17 @@ class Executor:
                         exc,
                         command,
                     )
+                    if on_output_line is not None:
+                        on_output_line(
+                            f"[error] 第 {attempt + 1}/{max_retries + 1} 次嘗試發生錯誤: "
+                            f"{type(exc).__name__}: {exc}"
+                        )
 
                 if attempt < max_retries:
-                    backoff_wait = min(2**attempt, _MAX_BACKOFF_SECONDS)
-                    time.sleep(min(backoff_wait, 10))
+                    backoff_wait = min(min(2**attempt, _MAX_BACKOFF_SECONDS), 10)
+                    if on_output_line is not None:
+                        on_output_line(f"[retry] {backoff_wait}s 後重試...")
+                    time.sleep(backoff_wait)
 
             duration = time.monotonic() - start_time
             final_return_code = (
@@ -1947,7 +1969,7 @@ class Executor:
                 resolved_command = self._resolve_command(command)
                 process = subprocess.Popen(
                     resolved_command,
-                    stdin=subprocess.PIPE if stdin_input else None,
+                    stdin=subprocess.PIPE if stdin_input else subprocess.DEVNULL,
                     stdout=subprocess.PIPE if capture_output else None,
                     stderr=subprocess.PIPE if capture_output else None,
                     shell=False,
@@ -2109,14 +2131,19 @@ class Executor:
         stdin_input: Optional[bytes] = None,
         temp_files: Optional[list[Path]] = None,
     ) -> subprocess.CompletedProcess[bytes]:
+        # DEVNULL stdin prevents CLI tools from blocking on interactive input,
+        # and avoids invalid inherited handles in windowed (no-console) builds.
+        stdin_kwargs: dict[str, Any] = (
+            {"input": stdin_input} if stdin_input else {"stdin": subprocess.DEVNULL}
+        )
         return subprocess.run(
             command,
-            input=stdin_input,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             shell=False,
             timeout=timeout,
             cwd=self._subprocess_cwd(),
+            **stdin_kwargs,
             creationflags=get_creation_flags(),
         )
 
@@ -2131,7 +2158,7 @@ class Executor:
         """Run a command and stream stdout/stderr lines to a callback."""
         process = subprocess.Popen(
             command,
-            stdin=subprocess.PIPE if stdin_input else None,
+            stdin=subprocess.PIPE if stdin_input else subprocess.DEVNULL,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             shell=False,
@@ -3410,7 +3437,10 @@ def _run(args: Optional[list[str]] = None) -> None:
 # Web GUI (Flask)
 # =============================================================================
 
-_gui_log_queue: queue.Queue[str] = queue.Queue(maxsize=10000)
+_GUI_LOG_HISTORY_LIMIT: int = 500
+_gui_log_lock = threading.Lock()
+_gui_log_history: deque[str] = deque(maxlen=_GUI_LOG_HISTORY_LIMIT)
+_gui_log_subscribers: set[queue.Queue[str]] = set()
 _gui_state_lock = threading.Lock()
 _gui_state: dict[str, Any] = {
     "running": False,
@@ -3425,18 +3455,40 @@ _gui_state: dict[str, Any] = {
 }
 
 
+def _gui_log_subscribe() -> queue.Queue[str]:
+    """Register an SSE client queue, pre-filled with recent history."""
+    client_queue: queue.Queue[str] = queue.Queue(maxsize=_GUI_LOG_HISTORY_LIMIT * 2)
+    with _gui_log_lock:
+        for line in _gui_log_history:
+            try:
+                client_queue.put_nowait(line)
+            except queue.Full:
+                break
+        _gui_log_subscribers.add(client_queue)
+    return client_queue
+
+
+def _gui_log_unsubscribe(client_queue: queue.Queue[str]) -> None:
+    with _gui_log_lock:
+        _gui_log_subscribers.discard(client_queue)
+
+
 def _gui_log(message: str) -> None:
-    """Push a log message to both the GUI queue and stderr."""
+    """Broadcast a log line to all SSE clients, stderr, and the desktop log."""
     timestamp = time.strftime("%H:%M:%S")
     formatted = f"[{timestamp}] {message}"
-    try:
-        _gui_log_queue.put_nowait(formatted)
-    except queue.Full:
+    with _gui_log_lock:
+        _gui_log_history.append(formatted)
+        subscribers = list(_gui_log_subscribers)
+    for client_queue in subscribers:
         try:
-            _gui_log_queue.get_nowait()
-            _gui_log_queue.put_nowait(formatted)
-        except queue.Empty:
-            pass
+            client_queue.put_nowait(formatted)
+        except queue.Full:
+            try:
+                client_queue.get_nowait()
+                client_queue.put_nowait(formatted)
+            except queue.Empty:
+                pass
     print(formatted, file=sys.stderr)
     if getattr(sys, "frozen", False):
         _desktop_log(formatted)
@@ -3796,13 +3848,18 @@ def _register_runtime_api_routes(
 
     @app.route("/api/logs")
     def api_logs():
+        client_queue = _gui_log_subscribe()
+
         def generate():
-            while True:
-                try:
-                    msg = _gui_log_queue.get(timeout=15)
-                    yield f"data: {msg}\n\n"
-                except queue.Empty:
-                    yield ": keepalive\n\n"
+            try:
+                while True:
+                    try:
+                        msg = client_queue.get(timeout=15)
+                        yield f"data: {msg}\n\n"
+                    except queue.Empty:
+                        yield ": keepalive\n\n"
+            finally:
+                _gui_log_unsubscribe(client_queue)
 
         return Response(
             generate(),

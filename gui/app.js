@@ -322,6 +322,11 @@ function connectSSE() {
     eventSource.onopen = () => {
         appConnected = true;
         updateAppStatusBadge();
+        // Server replays recent history on (re)connect; reset panel to avoid duplicates.
+        [...logPanel.children].forEach(child => {
+            if (child.id !== 'log-empty') child.remove();
+        });
+        if (logEmpty) logEmpty.hidden = false;
     };
     eventSource.onmessage = (e) => {
         if (e.data && e.data !== ':keepalive') addLog(e.data);

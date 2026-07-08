@@ -109,6 +109,23 @@ class SmokeTests(unittest.TestCase):
             ],
         )
 
+    def test_gui_log_broadcasts_to_all_subscribers(self) -> None:
+        q1 = self.mod._gui_log_subscribe()
+        q2 = self.mod._gui_log_subscribe()
+        try:
+            self.mod._gui_log("broadcast-check")
+            m1 = q1.get_nowait()
+            while "broadcast-check" not in m1:
+                m1 = q1.get_nowait()
+            m2 = q2.get_nowait()
+            while "broadcast-check" not in m2:
+                m2 = q2.get_nowait()
+            self.assertIn("broadcast-check", m1)
+            self.assertIn("broadcast-check", m2)
+        finally:
+            self.mod._gui_log_unsubscribe(q1)
+            self.mod._gui_log_unsubscribe(q2)
+
     def test_ensure_windows_user_path_adds_npm(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             npm_dir = Path(tmp) / "npm"
