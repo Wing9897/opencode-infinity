@@ -357,7 +357,9 @@ function hideLogEmpty() {
 }
 
 const LOG_FLUSH_BATCH_SIZE = 40;
+const LOG_FULL_HISTORY_LIMIT = 2000;
 let logPending = [];
+let logFullHistory = [];
 let logFlushScheduled = false;
 
 function getLogMaxLines() {
@@ -439,6 +441,7 @@ function buildLogLine(msg) {
     else if (msg.includes('  | -')) cls = ' log-diff-del';
     else if (msg.includes('  | ')) cls = ' log-cli';
     div.className = cls + (logCompactMode ? ' log-line-compact' : '');
+    div.dataset.logRaw = msg;
     div.textContent = formatLogLine(msg);
     return div;
 }
@@ -466,9 +469,52 @@ function scheduleLogFlush() {
 }
 
 function addLog(msg) {
+    logFullHistory.push(msg);
+    if (logFullHistory.length > LOG_FULL_HISTORY_LIMIT) {
+        logFullHistory.shift();
+    }
     if (!shouldDisplayLogLine(msg)) return;
     logPending.push(msg);
     scheduleLogFlush();
+}
+
+function collectLogText() {
+    if (logFullHistory.length > 0) {
+        return logFullHistory.join('\n');
+    }
+    return [...logPanel.children]
+        .filter((child) => child.id !== 'log-empty')
+        .map((child) => child.dataset.logRaw || child.textContent)
+        .join('\n');
+}
+
+function copyLogsToClipboard() {
+    const text = collectLogText().trim();
+    if (!text) {
+        showToast(t('toastLogsCopyFailed'), 'error');
+        return;
+    }
+    const onSuccess = () => showToast(t('toastLogsCopied'), 'success');
+    const fallbackCopy = () => {
+        const ta = document.createElement('textarea');
+        ta.value = text;
+        ta.style.position = 'fixed';
+        ta.style.opacity = '0';
+        document.body.appendChild(ta);
+        ta.select();
+        try {
+            document.execCommand('copy');
+            onSuccess();
+        } catch {
+            showToast(t('toastCopyFailed'), 'error');
+        }
+        document.body.removeChild(ta);
+    };
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(text).then(onSuccess).catch(fallbackCopy);
+    } else {
+        fallbackCopy();
+    }
 }
 
 function connectSSE() {
@@ -478,6 +524,7 @@ function connectSSE() {
         appConnected = true;
         updateAppStatusBadge();
         // Server replays recent history on (re)connect; reset panel to avoid duplicates.
+        logFullHistory = [];
         [...logPanel.children].forEach(child => {
             if (child.id !== 'log-empty') child.remove();
         });
@@ -628,7 +675,10 @@ document.querySelectorAll('.js-create-templates-btn').forEach((btn) => {
     btn.addEventListener('click', () => createFactoryTemplates(btn));
 });
 
+document.getElementById('log-copy-btn').addEventListener('click', copyLogsToClipboard);
+
 document.getElementById('log-clear-btn').addEventListener('click', () => {
+    logFullHistory = [];
     [...logPanel.children].forEach(child => {
         if (child.id !== 'log-empty') child.remove();
     });

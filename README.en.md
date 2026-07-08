@@ -40,8 +40,8 @@ python opencode_infinity.py --gui --no-browser --port 9000
 
 Open `http://127.0.0.1:8080` in your browser:
 
-- **Console** — pick a config, start/stop, working directory, live logs, stats
-- **Configs** — click **Create templates**, then **edit YAML manually** (no in-browser editor)
+- **Console** — pick a config, start/stop, working-directory override, live logs (compact by default), stats
+- **Config editor** — visual YAML editor, AI prompt generation, save configs
 - **UI language** — switch 中文 / English in the top-right corner
 
 ### Desktop exe (Release)
@@ -76,21 +76,30 @@ Config files live in the user directory by default (shared by CLI, browser GUI, 
 | macOS | `~/Library/Application Support/OpenCodeInfinity/configs/` |
 | Linux | `~/.config/OpenCodeInfinity/configs/` |
 
-Configs are **not** created automatically on first launch. In the Web GUI, click **Create templates** to generate `codex.yaml` and `opencode.yaml` from built-in templates (only missing files; existing configs are not overwritten).
+Configs are **not** created automatically on first launch. In the GUI, click **Create templates** to generate or **overwrite** these built-in seeds:
 
-Override with environment variables or CLI flags:
+| File | Description |
+|------|-------------|
+| `opencode.yaml` | Chinese serial article writing (OpenCode) |
+| `codex.yaml` | Chinese serial article writing (Codex + web search) |
+| `article-en.yaml` | English serial article writing (Codex + web search) |
+
+Seeds are designed to **write a little each round**, continuing `output/articles/draft.md` — not finishing the full article in one pass.
+
+Override the config directory with environment variables or CLI flags:
 
 ```bash
 set OPENCODE_INFINITY_CONFIG_DIR=D:\my-configs
 python opencode_infinity.py --config-dir ./configs codex
 ```
 
-Example config:
+### Config structure
 
 ```yaml
 cli:
   tool: "codex"           # opencode / claude / codex / copilot
   model: ""               # empty = default, or e.g. openai/gpt-5.2-codex
+  search: true            # Codex only: allow web search
 
 execution:
   delay: 1                # delay between rounds (seconds)
@@ -100,18 +109,30 @@ execution:
   switch_after_rounds: 0  # switch session after N rounds (0 = never)
   max_tokens: 128000      # token cap (used for session switching)
   token_threshold: 0.7    # switch at 70% (OpenCode/Claude)
-  working_dir: ""         # CLI working directory (empty = cwd at launch; GUI can override)
+  working_dir: ""         # default working directory (empty = cwd at launch)
 
 display:
   show_session_id: true
   show_timestamp: true
 
 prompts:
-  - "Continue working"
-  - "Check and fix issues"
+  - "First rotating prompt"
+  - "Second rotating prompt"
 
-summary_prompt: "Summarize this round (within 300 words)"
+summary_prompt: "Summary prompt before session switch"
 ```
+
+> The unused `task` section (name, description, language, output dir, etc.) has been removed. Legacy configs still load with warnings.
+
+### Working directory priority
+
+| Priority | Source | Notes |
+|----------|--------|-------|
+| 1 | Console **working dir override** | One-shot override; not saved to YAML |
+| 2 | YAML `execution.working_dir` | Default in the config file |
+| 3 | Launch directory | Used when both above are empty |
+
+The console shows which path will be used at start time.
 
 ### Platform feature matrix
 
@@ -134,12 +155,15 @@ summary_prompt: "Summarize this round (within 300 words)"
 - Hot reload: edit YAML while running; changes apply on the next round
 - Input sanitization: guards against command injection
 - Live output: Codex reasoning streams to the terminal
-- Web GUI: start/stop and log monitoring (edit YAML for settings)
+- Web GUI: console + config editor + AI prompt generation
+- Compact logs: show only the latest key log lines by default
 - Success/failure stats on Ctrl+C
 
 ## Important
 
-⚠️ **Do not run inside this tool’s repo** — `cd` into your target project first, or the AI may modify this tool’s source. The source GUI lets you set a **working directory** under Advanced options, or set `execution.working_dir` in YAML.
+⚠️ **Do not run inside this tool’s repo** — `cd` into your target project first, or the AI may modify this tool’s source. Set `execution.working_dir` in the editor, or use the console **working dir override** under Advanced options.
+
+**Is `output/articles/draft.md` empty?** If the folder and file were created, write permissions are fine — this is usually not an exe permission issue. The AI often creates the file before filling it; let the loop continue and check the **📁 working directory** line in the logs matches your project path.
 
 ## Project layout
 
@@ -150,19 +174,19 @@ opencode-infinity/
 │   ├── launcher.py         ← exe entry (embedded window)
 │   └── opencode_infinity.spec
 ├── gui/
-│   ├── index.html          ← Web GUI (console)
+│   ├── index.html          ← Web GUI
 │   ├── styles.css
 │   ├── app.js
 │   └── i18n.js
 ├── configs/
-│   └── test-opencode.yaml  ← local OpenCode smoke test (built-in templates via GUI)
+│   └── test-opencode.yaml  ← local OpenCode smoke test
 ├── tests/
 │   └── test_smoke.py
 ├── requirements.txt
 ├── requirements-desktop.txt
 ├── .github/workflows/
-│   ├── ci.yml              ← tests on PR / push
-│   └── build-desktop.yml   ← build + release on push to main
+│   ├── ci.yml
+│   └── build-desktop.yml
 ├── README.md
 ├── README.en.md
 └── .gitignore

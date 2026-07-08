@@ -2,7 +2,7 @@
 
 **語言：** [中文](README.md) · [English](README.en.md)
 
-讓 AI 編碼工具（Codex、Claude、OpenCode、Copilot）7x24 無人值守自動循環執行。
+讓 AI 編碼工具（Codex、Claude、OpenCode、Copilot）7×24 無人值守自動循環執行。
 
 設好 prompt，它就自動幫你不斷叫 AI 做事 — 處理重試、超時、session 管理，你去睡覺它繼續跑。
 
@@ -39,9 +39,10 @@ python opencode_infinity.py --gui --no-browser --port 9000
 ```
 
 開啟瀏覽器 `http://127.0.0.1:8080`，提供：
-- 控制台 — 選 config、啟動/停止、工作目錄、即時日誌、統計
-- 設定檔 — 點「建立範本」後，**手動編輯 YAML**（不在網頁內建編輯器）
-- 介面語言 — 右上角可切換中文 / English
+
+- **控制台** — 選設定檔、啟動/停止、工作目錄覆寫、即時日誌（預設輕量顯示）、統計
+- **設定編輯器** — 圖形化編輯 YAML、AI 生成提示詞、保存設定檔
+- **介面語言** — 右上角可切換中文 / English
 
 ### 桌面 exe（Release）
 
@@ -75,21 +76,30 @@ pyinstaller desktop/opencode_infinity.spec --noconfirm
 | macOS | `~/Library/Application Support/OpenCodeInfinity/configs/` |
 | Linux | `~/.config/OpenCodeInfinity/configs/` |
 
-首次啟動不會自動建立設定檔。請在 Web GUI 點 **「建立範本」**，才會從內建範本建立 `codex.yaml`、`opencode.yaml`（僅建立缺少的檔案，不會覆蓋既有設定）。
+首次啟動不會自動建立設定檔。請在 GUI 點 **「建立範本」**，會建立或**覆蓋**以下內建種子：
 
-也可用環境變數或參數覆寫：
+| 檔案 | 說明 |
+|------|------|
+| `opencode.yaml` | 中文連載文章（OpenCode） |
+| `codex.yaml` | 中文連載文章（Codex + 網路搜尋） |
+| `article-en.yaml` | 英文連載文章（Codex + 網路搜尋） |
+
+種子設計為**每輪只寫一小段**，接續 `output/articles/draft.md` 繼續創作，而非一輪寫完全文。
+
+也可用環境變數或參數覆寫設定目錄：
 
 ```bash
 set OPENCODE_INFINITY_CONFIG_DIR=D:\my-configs
 python opencode_infinity.py --config-dir ./configs codex
 ```
 
-編輯設定檔範例：
+### 設定檔結構
 
 ```yaml
 cli:
   tool: "codex"           # opencode / claude / codex / copilot
   model: ""               # 留空用預設，或指定如 openai/gpt-5.2-codex
+  search: true            # Codex 專用：允許網路搜尋
 
 execution:
   delay: 1                # 每輪延遲（秒）
@@ -99,18 +109,30 @@ execution:
   switch_after_rounds: 0  # 跑多少輪切換 session（0 = 不切換）
   max_tokens: 128000      # Token 上限（用於判斷何時切換 session）
   token_threshold: 0.7    # 達到 70% 時切換（OpenCode/Claude 支援）
-  working_dir: ""         # CLI 工作目錄（留空 = 啟動時 cwd；GUI 可覆寫）
+  working_dir: ""         # 預設工作目錄（留空 = 啟動時 cwd）
 
 display:
   show_session_id: true
   show_timestamp: true
 
 prompts:
-  - "繼續工作"
-  - "檢查並修復問題"
+  - "第一個循環提示詞"
+  - "第二個循環提示詞"
 
-summary_prompt: "總結本輪工作（300字內）"
+summary_prompt: "Session 切換前的總結提示詞"
 ```
+
+> 已移除未使用的 `task` 區塊（名稱、描述、語言、輸出目錄等）。舊設定檔仍可載入，僅會顯示警告。
+
+### 工作目錄優先順序
+
+| 優先級 | 來源 | 說明 |
+|--------|------|------|
+| 1 | 控制台「工作目錄覆寫」 | 單次啟動臨時覆寫，不寫入 YAML |
+| 2 | YAML `execution.working_dir` | 設定檔預設值 |
+| 3 | 程式啟動目錄 | 兩處皆留空時使用 |
+
+控制台會即時顯示啟動時將使用的路徑。
 
 ### 平台支援差異
 
@@ -133,12 +155,15 @@ summary_prompt: "總結本輪工作（300字內）"
 - 熱重載：運行中修改 YAML，下一輪自動套用
 - 輸入消毒：防止命令注入
 - 即時輸出：Codex 的思考過程直接顯示在終端
-- Web GUI：啟動/停止、日誌監看（設定請編輯 YAML）
+- Web GUI：控制台 + 設定編輯器 + AI 生成提示詞
+- 輕量日誌：預設只顯示最近幾條重點日誌
 - 成功/失敗統計：Ctrl+C 時顯示
 
 ## 注意事項
 
-⚠️ **不要在本工具目錄中執行** — 請 `cd` 到目標專案目錄再跑，否則 AI 會修改本工具的程式碼。源碼版 GUI 可在「進階選項」設定 **工作目錄**，或於 YAML 設定 `execution.working_dir`。
+⚠️ **不要在本工具目錄中執行** — 請 `cd` 到目標專案目錄再跑，否則 AI 會修改本工具的程式碼。可在編輯器設定 `execution.working_dir`，或在控制台「進階選項」臨時覆寫工作目錄。
+
+**`output/articles/draft.md` 是空檔？** 若能建立資料夾與 `.md` 檔，代表寫入權限正常，不是 exe 權限問題。常見原因是本輪 AI 只建了檔案尚未寫入內容 — 讓循環繼續跑下一輪，並在日誌確認「📁 工作目錄」路徑是否為你預期的專案位置。
 
 ## 專案結構
 
@@ -149,19 +174,19 @@ opencode-infinity/
 │   ├── launcher.py         ← exe 入口（內嵌視窗）
 │   └── opencode_infinity.spec
 ├── gui/
-│   ├── index.html          ← Web GUI（控制台）
+│   ├── index.html          ← Web GUI
 │   ├── styles.css
 │   ├── app.js
 │   └── i18n.js
 ├── configs/
-│   └── test-opencode.yaml  ← 本機 OpenCode 實測用（內建範本由程式碼提供，經 GUI 建立）
+│   └── test-opencode.yaml  ← 本機 OpenCode 實測用
 ├── tests/
 │   └── test_smoke.py
 ├── requirements.txt
 ├── requirements-desktop.txt
 ├── .github/workflows/
-│   ├── ci.yml              ← PR / push 時跑測試
-│   └── build-desktop.yml   ← push main 時 build + release
+│   ├── ci.yml
+│   └── build-desktop.yml
 ├── README.md
 ├── README.en.md
 └── .gitignore

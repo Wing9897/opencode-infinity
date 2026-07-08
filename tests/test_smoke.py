@@ -63,11 +63,11 @@ class SmokeTests(unittest.TestCase):
             config_dir = self.mod.init_config_dir(tmp)
             result = self.mod._create_factory_templates(config_dir)
             self.assertEqual(result["errors"], [])
-            self.assertEqual(sorted(result["created"]), ["codex.yaml", "opencode.yaml"])
+            self.assertEqual(sorted(result["created"]), ["article-en.yaml", "codex.yaml", "opencode.yaml"])
             self.assertEqual(result["overwritten"], [])
             self.assertEqual(
                 sorted(path.name for path in config_dir.glob("*.yaml")),
-                ["codex.yaml", "opencode.yaml"],
+                ["article-en.yaml", "codex.yaml", "opencode.yaml"],
             )
 
     def test_create_factory_templates_overwrites_existing(self) -> None:
@@ -77,7 +77,7 @@ class SmokeTests(unittest.TestCase):
             config_dir = self.mod.init_config_dir(tmp)
             result = self.mod._create_factory_templates(config_dir)
             self.assertEqual(result["errors"], [])
-            self.assertEqual(result["created"], ["codex.yaml"])
+            self.assertEqual(sorted(result["created"]), ["article-en.yaml", "codex.yaml"])
             self.assertEqual(result["overwritten"], ["opencode.yaml"])
             self.assertIn("連載文章創作", existing.read_text(encoding="utf-8"))
 
@@ -190,7 +190,7 @@ class SmokeTests(unittest.TestCase):
             self.assertEqual(create_response.status_code, 200)
             create_payload = create_response.get_json()
             self.assertTrue(create_payload["ok"])
-            self.assertEqual(sorted(create_payload["created"]), ["codex.yaml", "opencode.yaml"])
+            self.assertEqual(sorted(create_payload["created"]), ["article-en.yaml", "codex.yaml", "opencode.yaml"])
 
             self.assertIn("codex.yaml", client.get("/api/configs").get_json()["configs"])
             self.assertFalse(client.get("/api/status").get_json()["running"])

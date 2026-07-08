@@ -2583,6 +2583,7 @@ prompts:
     - 撰寫「開篇 + 第一章」約 400-600 字
     - 文末加上 <!-- CONTINUE: 下一章節標題 --> 標記待寫段落
     - 禁止本輪寫完全文或結語
+    - 寫入後確認 draft.md 非空且至少 200 字；若為空檔請在本輪內補寫
   - |
     打開 draft.md，從 <!-- CONTINUE --> 標記處接續創作：
     - 本輪只寫下一個章節，約 400-600 字
@@ -2634,6 +2635,7 @@ prompts:
     - 撰寫開篇與第一章約 400-600 字，文末附「參考來源」小節
     - 加上 <!-- CONTINUE: 下一章節標題 -->
     - 一輪寫不完是正常流程，不要寫結語
+    - 寫入後確認 draft.md 非空且至少 200 字；若為空檔請在本輪內補寫
   - |
     接續 draft.md：先搜尋本 chapter 需要的事實、數據或案例，再撰寫下一章約 400-600 字：
     - 從 CONTINUE 標記處接寫，不重寫前文
@@ -2655,6 +2657,58 @@ summary_prompt: |
   1. 本輪新增哪一章、用了哪些資料來源
   2. 全文完成度與待寫章節
   3. 下一輪建議接寫方向
+""",
+    "article-en.yaml": """# Factory template · serial article writing (English)
+# Write a little each round; continue the draft — do not finish in one round
+cli:
+  tool: codex
+  search: true
+
+execution:
+  delay: 1
+  timeout: 300
+  max_retries: 5
+  auto_continue_on_error: true
+  max_rounds: 0
+  switch_after_rounds: 0
+  max_tokens: 128000
+  token_threshold: 0.7
+  # working_dir: "D:/my-project"  # empty = launch directory
+
+display:
+  show_session_id: true
+  show_timestamp: true
+
+prompts:
+  - |
+    Create or open a serial draft at output/articles/draft.md (read existing file; do not rewrite):
+    - This round only: pick a topic and outline 4-6 chapters
+    - Write the opening plus chapter 1 (~400-600 words)
+    - End with <!-- CONTINUE: next chapter title -->
+    - Do not finish the full article or write a conclusion this round
+    - After writing, verify draft.md is non-empty (at least 200 words); rewrite in-round if empty
+  - |
+    Continue draft.md from the <!-- CONTINUE --> marker:
+    - Write only the next chapter (~400-600 words)
+    - Match tone and add 1-2 bridging sentences
+    - Update the CONTINUE marker
+    - Do not rewrite prior sections or finish the whole piece in one round
+  - |
+    Keep expanding draft.md — add the next chapter or deepen the weakest section:
+    - List completed vs pending chapters (one line each)
+    - Focus on new content, not a full rewrite
+    - If 2+ chapters remain, do not write a conclusion
+  - |
+    Continue with a new section (case study, story, or argument):
+    - You may tweak at most 2 bridging sentences; no full rewrites
+    - ~400-600 words; keep the draft in progress
+    - Update the CONTINUE marker
+
+summary_prompt: |
+  Summarize this round's article progress in English (max 200 words):
+  1. Which chapter was added and approximate word count
+  2. Overall completion (done vs pending chapters)
+  3. Suggested focus for the next round
 """,
 }
 
@@ -3478,6 +3532,28 @@ def _gui_log(message: str) -> None:
         _eprint(formatted)
 
 
+def _gui_log_article_draft_status(working_dir: Optional[Path]) -> None:
+    """Log draft.md size after a round to help diagnose empty output files."""
+    base = working_dir if working_dir is not None else Path.cwd()
+    draft = base / "output" / "articles" / "draft.md"
+    if not draft.is_file():
+        return
+    try:
+        size = draft.stat().st_size
+    except OSError as exc:
+        _gui_log(f"  ⚠️ 無法讀取 draft.md: {exc}")
+        return
+    if size == 0:
+        _gui_log(
+            "  ⚠️ draft.md 已建立但為空檔。"
+            "這通常不是 exe 權限問題（能建檔代表目錄可寫），"
+            "而是本輪 AI 尚未寫入內容；請確認工作目錄正確並讓下一輪繼續。"
+        )
+        _gui_log(f"  📁 檔案位置: {draft.resolve()}")
+        return
+    _gui_log(f"  📝 draft.md 目前 {size} bytes — {draft.resolve()}")
+
+
 def _gui_run_task(
     config_name: str,
     session_id: str,
@@ -3591,12 +3667,14 @@ def _gui_run_task(
                 cli_log_state["count"] += 1
             _gui_log(f"  | {truncate_text(clean, 1200)}")
 
+        def _on_gui_round_success(round_num: int, result: ExecutionResult) -> None:
+            _gui_log(f"  ✅ Round {round_num} 完成 ({result.duration_seconds:.1f}s)")
+            _gui_log_article_draft_status(working_dir)
+
         hooks = _ExecutionLoopHooks(
             should_stop=stop_event.is_set,
             on_round_begin=_on_gui_round_begin,
-            on_round_success=lambda round_num, result: _gui_log(
-                f"  ✅ Round {round_num} 完成 ({result.duration_seconds:.1f}s)"
-            ),
+            on_round_success=_on_gui_round_success,
             on_round_failure=lambda round_num, result: _gui_log(
                 f"  ❌ Round {round_num} 失敗 (code={result.return_code}, retries={result.retry_count})"
             ),
