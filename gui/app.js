@@ -2,6 +2,10 @@
 const STORAGE_KEY_TAB = 'oci_active_tab';
 const STORAGE_KEY_CONFIG = 'oci_last_config';
 const STORAGE_KEY_WORKING_DIR = 'oci_working_dir';
+const STORAGE_KEY_LOG_COMPACT = 'oci_log_compact';
+const LOG_MAX_LINES_FULL = 40;
+const LOG_MAX_LINES_COMPACT = 8;
+const LOG_COMPACT_MAX_CHARS = 140;
 
 function debounce(fn, delay) {
     let timer = null;
@@ -129,6 +133,7 @@ function refreshDynamicI18n() {
     if (scrollBtn) {
         scrollBtn.textContent = logAutoScroll ? t('logAutoscroll') : t('logAutoscrollOff');
     }
+    updateLogCompactButton();
     updateAppStatusBadge();
 }
 
@@ -184,6 +189,7 @@ let statusInterval = null;
 let appRunning = false;
 let appConnected = false;
 let logAutoScroll = true;
+let logCompactMode = localStorage.getItem(STORAGE_KEY_LOG_COMPACT) !== '0';
 let activeConfigName = '';
 const STATUS_POLL_IDLE_MS = 8000;
 const STATUS_POLL_ACTIVE_MS = 2000;
@@ -300,6 +306,75 @@ const LOG_FLUSH_BATCH_SIZE = 40;
 let logPending = [];
 let logFlushScheduled = false;
 
+function getLogMaxLines() {
+    return logCompactMode ? LOG_MAX_LINES_COMPACT : LOG_MAX_LINES_FULL;
+}
+
+function isImportantLogLine(msg) {
+    if (!msg) return false;
+    const markers = ['✅', '❌', '⚠', '🚀', '📄', '📁', '🔧', '▶', '⏳', '⏹', '🏁', '⛔', 'Round '];
+    if (markers.some((marker) => msg.includes(marker))) return true;
+    if (/\[(retry|timeout|error)\]/i.test(msg)) return true;
+    if (/啟動|完成|失敗|設定|工作目錄|OpenCode|已摺疊/i.test(msg)) return true;
+    return false;
+}
+
+function shouldDisplayLogLine(msg) {
+    if (!logCompactMode) return true;
+    if (isImportantLogLine(msg)) return true;
+    const lower = msg.toLowerCase();
+    if (lower.includes('service=') && lower.includes('info')) return false;
+    if (lower.includes('subscribing') || lower.includes('status=started')) return false;
+    return false;
+}
+
+function formatLogLine(msg) {
+    if (!logCompactMode) return msg;
+    let text = msg.replace(/^\[\d{2}:\d{2}:\d{2}\]\s*/, '');
+    if (text.length > LOG_COMPACT_MAX_CHARS) {
+        text = text.slice(0, LOG_COMPACT_MAX_CHARS - 3) + '...';
+    }
+    return text;
+}
+
+function trimLogPanelToLimit() {
+    const maxLines = getLogMaxLines();
+    const entries = [...logPanel.children].filter((child) => child.id !== 'log-empty');
+    while (entries.length > maxLines) {
+        const first = entries.shift();
+        if (first) first.remove();
+    }
+    if (entries.length === 0 && logEmpty) logEmpty.hidden = false;
+}
+
+function applyLogDisplayMode() {
+    logPanel.classList.toggle('is-compact', logCompactMode);
+    logPanel.closest('.log-card')?.classList.toggle('is-compact', logCompactMode);
+    [...logPanel.children].forEach((child) => {
+        if (child.id === 'log-empty') return;
+        if (logCompactMode) {
+            if (!shouldDisplayLogLine(child.textContent)) {
+                child.remove();
+                return;
+            }
+            child.textContent = formatLogLine(child.textContent);
+            child.classList.add('log-line-compact');
+        } else {
+            child.classList.remove('log-line-compact');
+        }
+    });
+    trimLogPanelToLimit();
+    updateLogCompactButton();
+}
+
+function updateLogCompactButton() {
+    const btn = document.getElementById('log-compact-btn');
+    if (!btn) return;
+    btn.classList.toggle('active', logCompactMode);
+    btn.textContent = logCompactMode ? t('logCompact') : t('logCompactOff');
+    btn.title = logCompactMode ? t('logCompactHint', { n: LOG_MAX_LINES_COMPACT }) : t('logCompactOff');
+}
+
 function buildLogLine(msg) {
     const div = document.createElement('div');
     let cls = '';
@@ -309,8 +384,8 @@ function buildLogLine(msg) {
     else if (msg.includes('  | +')) cls = ' log-diff-add';
     else if (msg.includes('  | -')) cls = ' log-diff-del';
     else if (msg.includes('  | ')) cls = ' log-cli';
-    div.className = cls;
-    div.textContent = msg;
+    div.className = cls + (logCompactMode ? ' log-line-compact' : '');
+    div.textContent = formatLogLine(msg);
     return div;
 }
 
@@ -320,13 +395,13 @@ function flushLogPending() {
     hideLogEmpty();
     const fragment = document.createDocumentFragment();
     const batch = logPending.splice(0, LOG_FLUSH_BATCH_SIZE);
-    batch.forEach((msg) => fragment.appendChild(buildLogLine(msg)));
-    logPanel.appendChild(fragment);
+    batch.forEach((msg) => {
+        if (!shouldDisplayLogLine(msg)) return;
+        fragment.appendChild(buildLogLine(msg));
+    });
+    if (fragment.childNodes.length > 0) logPanel.appendChild(fragment);
+    trimLogPanelToLimit();
     if (logAutoScroll) logPanel.scrollTop = logPanel.scrollHeight;
-    while (logPanel.children.length > 501) {
-        const first = logPanel.firstElementChild;
-        if (first && first.id !== 'log-empty') first.remove();
-    }
     if (logPending.length > 0) scheduleLogFlush();
 }
 
@@ -337,6 +412,7 @@ function scheduleLogFlush() {
 }
 
 function addLog(msg) {
+    if (!shouldDisplayLogLine(msg)) return;
     logPending.push(msg);
     scheduleLogFlush();
 }
@@ -510,6 +586,14 @@ document.getElementById('log-autoscroll-btn').addEventListener('click', (e) => {
     logAutoScroll = !logAutoScroll;
     e.currentTarget.classList.toggle('active', logAutoScroll);
     e.currentTarget.textContent = logAutoScroll ? t('logAutoscroll') : t('logAutoscrollOff');
+});
+
+document.getElementById('log-compact-btn').addEventListener('click', (e) => {
+    logCompactMode = !logCompactMode;
+    localStorage.setItem(STORAGE_KEY_LOG_COMPACT, logCompactMode ? '1' : '0');
+    applyLogDisplayMode();
+    e.currentTarget.classList.toggle('active', logCompactMode);
+    showToast(logCompactMode ? t('logCompactHint', { n: LOG_MAX_LINES_COMPACT }) : t('logCompactOff'), 'info');
 });
 
 copySessionBtn.addEventListener('click', () => {
@@ -897,6 +981,7 @@ document.addEventListener('keydown', (event) => {
 
 // Init
 updateAppStatusBadge();
+applyLogDisplayMode();
 connectSSE();
 scheduleStatusPoll();
 updateStatus();

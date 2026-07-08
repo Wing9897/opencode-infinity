@@ -81,15 +81,16 @@
             </details>
         </div>
 
-        <div class="log-card">
+        <div class="log-card is-compact">
             <div class="log-panel-header">
                 <span class="log-panel-title" data-i18n="logTitle">即時日誌</span>
                 <div class="log-panel-actions">
+                    <button id="log-compact-btn" class="ghost-btn active" type="button" data-i18n-title="logCompact" title="輕量顯示">輕量顯示</button>
                     <button id="log-autoscroll-btn" class="ghost-btn active" type="button" data-i18n-title="logAutoscroll" data-i18n="logAutoscroll" title="自動捲動">自動捲動</button>
                     <button id="log-clear-btn" class="ghost-btn" type="button" data-i18n-title="logClear" data-i18n="logClear" title="清除日誌">清除</button>
                 </div>
             </div>
-            <div id="log-panel" class="log-panel">
+            <div id="log-panel" class="log-panel is-compact">
                 <div id="log-empty" class="log-empty" data-i18n="logEmpty">選擇設定檔後點擊「啟動」，日誌會即時顯示在這裡。</div>
             </div>
         </div>

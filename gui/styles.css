@@ -514,6 +514,26 @@ button:disabled {
     margin: 0;
 }
 
+.log-panel.is-compact {
+    font-size: 11px;
+    line-height: 1.45;
+    padding: var(--space-2) var(--space-3);
+    max-height: 220px;
+}
+
+.log-card.is-compact {
+    min-height: 0;
+}
+
+.log-panel.is-compact > div:not(.log-empty) {
+    padding: 0.08rem 0;
+    border-bottom-color: rgba(148, 163, 184, 0.08);
+}
+
+.log-line-compact.log-cli {
+    color: #94a3b8;
+}
+
 .log-panel > div:not(.log-empty) {
     padding: 0.12rem 0;
     border-bottom: 1px solid rgba(148, 163, 184, 0.12);
