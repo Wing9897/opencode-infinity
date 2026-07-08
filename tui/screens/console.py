@@ -2,12 +2,20 @@
 from __future__ import annotations
 
 from textual.app import ComposeResult
-from textual.containers import Horizontal, Vertical
+from textual.containers import Grid, Horizontal, Vertical
 from textual.widgets import Button, Collapsible, Input, Label, Select, Static
 
 from tui import i18n, services, state as ui_state
+from tui.form_utils import select_empty
+from tui.locale_refresh import (
+    _set_button,
+    _set_collapsible,
+    _set_input_placeholder,
+    _set_label,
+    _set_static,
+)
 from tui.messages import ConfigListChanged, LogLine, StatsUpdated
-from tui.runtime import RunController
+from tui.runtime import RunController, stats_message_from_snapshot
 from tui.services import ServiceError
 from tui.widgets.log_panel import LogPanel, StatsBar
 
@@ -17,21 +25,8 @@ class ConsolePanel(Vertical):
 
     DEFAULT_CSS = """
     ConsolePanel {
+        align: center top;
         height: 1fr;
-    }
-    #console-controls {
-        height: auto;
-        padding: 0 0 1 0;
-    }
-    #config-select {
-        width: 1fr;
-    }
-    .action-btn {
-        min-width: 12;
-    }
-    #advanced-grid {
-        height: auto;
-        padding: 1 0;
     }
     """
 
@@ -41,22 +36,98 @@ class ConsolePanel(Vertical):
         self._configs: list[str] = []
 
     def compose(self) -> ComposeResult:
-        with Horizontal(id="console-controls"):
-            yield Select([], id="config-select", prompt=i18n.t("label_config"))
-            yield Button(i18n.t("btn_templates"), id="btn-templates", classes="action-btn")
-            yield Button(i18n.t("btn_refresh"), id="btn-refresh", classes="action-btn")
-            yield Button(i18n.t("btn_diagnose"), id="btn-diagnose", classes="action-btn")
-            yield Button(i18n.t("btn_start"), id="btn-start", variant="success", classes="action-btn")
-            yield Button(i18n.t("btn_stop"), id="btn-stop", variant="error", classes="action-btn", disabled=True)
-        yield StatsBar(id="stats-bar")
-        with Collapsible(title=i18n.t("advanced"), collapsed=True):
-            with Vertical(id="advanced-grid"):
-                yield Label(i18n.t("label_working_dir"))
-                yield Input(placeholder="留空沿用 YAML / 啟動目錄", id="working-dir")
-                yield Label(i18n.t("label_session"))
-                yield Input(placeholder="ses_...（留空自動生成）", id="session-id")
-        yield Label(i18n.t("log_title"))
-        yield LogPanel(id="log-panel")
+        with Vertical(id="console-shell"):
+            with Horizontal(classes="toolbar-row", id="console-controls"):
+                yield Select(
+                    [],
+                    id="config-select",
+                    prompt=i18n.t("prompt_select_config"),
+                )
+                yield Button(
+                    i18n.t("btn_templates"), id="btn-templates", classes="action-btn"
+                )
+                yield Button(
+                    i18n.t("btn_refresh"), id="btn-refresh", classes="action-btn"
+                )
+                yield Button(
+                    i18n.t("btn_diagnose"), id="btn-diagnose", classes="action-btn"
+                )
+                yield Button(i18n.t("btn_start"), id="btn-start", classes="action-btn")
+                yield Button(
+                    i18n.t("btn_stop"), id="btn-stop", classes="action-btn", disabled=True
+                )
+            yield Static(
+                i18n.t("hint_pick_config"),
+                id="console-required-hint",
+                classes="required-hint",
+            )
+            yield StatsBar(id="stats-bar")
+            with Collapsible(
+                title=i18n.t("advanced"),
+                collapsed=True,
+                classes="section-card",
+                id="section-advanced",
+            ):
+                with Grid(classes="form-grid"):
+                    yield Label(
+                        i18n.t("label_working_dir"),
+                        id="lbl-working-dir",
+                        classes="form-label",
+                    )
+                    yield Input(
+                        placeholder=i18n.t("placeholder_working_dir"),
+                        id="working-dir",
+                        classes="form-value",
+                    )
+                    yield Label(
+                        i18n.t("label_session"),
+                        id="lbl-session",
+                        classes="form-label",
+                    )
+                    yield Input(
+                        placeholder=i18n.t("placeholder_session"),
+                        id="session-id",
+                        classes="form-value",
+                    )
+            with Horizontal(classes="log-toolbar", id="log-toolbar"):
+                yield Static(i18n.t("log_title"), id="log-header", classes="log-header")
+                yield Button(
+                    i18n.t("btn_copy_log"),
+                    id="btn-copy-log",
+                    classes="action-btn",
+                )
+            yield LogPanel(id="log-panel")
+
+    def refresh_locale(self) -> None:
+        select = self.query_one("#config-select", Select)
+        select.prompt = i18n.t("prompt_select_config")
+        _set_static("console-required-hint", "hint_pick_config", self)
+        _set_static("log-header", "log_title", self)
+        _set_button("btn-templates", "btn_templates", self)
+        _set_button("btn-refresh", "btn_refresh", self)
+        _set_button("btn-diagnose", "btn_diagnose", self)
+        _set_button("btn-start", "btn_start", self)
+        _set_button("btn-stop", "btn_stop", self)
+        _set_button("btn-copy-log", "btn_copy_log", self)
+        _set_collapsible("section-advanced", "advanced", self)
+        _set_label("lbl-working-dir", "label_working_dir", self)
+        _set_label("lbl-session", "label_session", self)
+        _set_input_placeholder("working-dir", "placeholder_working_dir", self)
+        _set_input_placeholder("session-id", "placeholder_session", self)
+        self._reload_config_options()
+        self._refresh_required_hints()
+        self._update_stats_display()
+
+    def _reload_config_options(self) -> None:
+        """Refresh config dropdown labels without re-triggering selection logic."""
+        select = self.query_one("#config-select", Select)
+        current = select.value
+        options = [(name, name) for name in self._configs] or [
+            (i18n.t("no_configs"), "")
+        ]
+        select.set_options(options)
+        if isinstance(current, str) and current and select.value != current:
+            select.value = current
 
     def on_mount(self) -> None:
         self.refresh_configs()
@@ -64,7 +135,19 @@ class ConsolePanel(Vertical):
         if saved:
             self._select_config(saved)
         self._update_stats_display()
-        self.query_one("#log-panel", LogPanel).write(i18n.t("log_empty"))
+        self._refresh_required_hints()
+        self.query_one("#log-panel", LogPanel).append_line(i18n.t("log_empty"))
+
+    def _refresh_required_hints(self) -> None:
+        select = self.query_one("#config-select", Select)
+        hint = self.query_one("#console-required-hint", Static)
+        missing = select_empty(select)
+        if missing:
+            hint.update(i18n.t("hint_pick_config"))
+            hint.remove_class("-ok")
+        else:
+            hint.update(i18n.t("hint_pick_config_ok"))
+            hint.add_class("-ok")
 
     def refresh_configs(self) -> None:
         self._configs = services.list_configs()
@@ -80,6 +163,7 @@ class ConsolePanel(Vertical):
             else:
                 select.value = self._configs[0]
             self._on_config_changed()
+        self._refresh_required_hints()
 
     def _select_config(self, name: str) -> None:
         if name in self._configs:
@@ -96,8 +180,11 @@ class ConsolePanel(Vertical):
         self.query_one("#working-dir", Input).value = override
 
     def on_select_changed(self, event: Select.Changed) -> None:
+        if getattr(self.app, "_locale_changing", False):
+            return
         if event.select.id == "config-select":
             self._on_config_changed()
+            self._refresh_required_hints()
 
     def on_input_changed(self, event: Input.Changed) -> None:
         if event.input.id == "working-dir":
@@ -110,7 +197,7 @@ class ConsolePanel(Vertical):
         button_id = event.button.id or ""
         if button_id == "btn-refresh":
             self.refresh_configs()
-            self.notify("Configs refreshed")
+            self.notify(i18n.t("toast_configs_reloaded"))
         elif button_id == "btn-templates":
             self._create_templates()
         elif button_id == "btn-diagnose":
@@ -120,43 +207,62 @@ class ConsolePanel(Vertical):
         elif button_id == "btn-stop":
             self.controller.stop()
             self.notify(i18n.t("toast_stopped"))
+        elif button_id == "btn-copy-log":
+            self.copy_log()
+
+    def copy_log(self) -> None:
+        panel = self.query_one("#log-panel", LogPanel)
+        text = panel.plain_text().strip()
+        if not text:
+            self.notify(i18n.t("toast_log_copy_empty"), severity="warning")
+            return
+        self.app.copy_to_clipboard(text)
+        self.notify(i18n.t("toast_log_copied"))
 
     def _create_templates(self) -> None:
         result = services.create_templates()
         created = result.get("created", [])
         overwritten = result.get("overwritten", [])
-        names = ", ".join(created + overwritten) or "none"
+        names = ", ".join(created + overwritten) or i18n.t("templates_none")
         self.notify(i18n.t("toast_templates", names=names))
         self.refresh_configs()
 
     def _run_diagnose(self) -> None:
         report = services.get_diagnose()
         log = self.query_one("#log-panel", LogPanel)
-        log.write("🔍 環境診斷")
+        log.append_line(
+            f"--- {i18n.t('diag_title')} ---",
+        )
         build = report.get("build") or {}
         if build:
-            log.write(f"  Infinity: {build.get('mode')} {build.get('version')}")
+            log.append_line(
+                f"  {i18n.t('diag_infinity')}: {build.get('mode')} {build.get('version')}"
+            )
         opencode = report.get("opencode")
         if opencode:
-            log.write(
-                f"  OpenCode: {opencode.get('version')} @ {opencode.get('path')}"
+            log.append_line(
+                f"  {i18n.t('diag_opencode')}: {opencode.get('version')} "
+                f"@ {opencode.get('path')}"
             )
-            log.write(f"  Headless: {opencode.get('headless_mode')}")
+            log.append_line(
+                f"  {i18n.t('diag_headless')}: {opencode.get('headless_mode')}"
+            )
         if report.get("config_dir"):
-            log.write(f"  Config: {report['config_dir']}")
+            log.append_line(f"  {i18n.t('diag_config_dir')}: {report['config_dir']}")
         if report.get("working_dir"):
-            log.write(f"  CWD: {report['working_dir']}")
+            log.append_line(f"  {i18n.t('diag_cwd')}: {report['working_dir']}")
         issues = report.get("issues") or []
         if issues:
             for issue in issues:
-                log.write(f"  ⚠️ {issue}")
+                log.append_line(f"  ! {issue}")
         else:
-            log.write("  ✅ 未發現問題")
+            log.append_line(f"  {i18n.t('diag_no_issues')}")
 
     def _start_run(self) -> None:
         select = self.query_one("#config-select", Select)
         config_name = select.value
         if not isinstance(config_name, str) or not config_name:
+            self._refresh_required_hints()
             self.notify(i18n.t("toast_select_config"))
             return
         session_id = self.query_one("#session-id", Input).value.strip()
@@ -183,38 +289,28 @@ class ConsolePanel(Vertical):
         self.notify(i18n.t("toast_started"))
 
     def on_log_line(self, message: LogLine) -> None:
-        self.query_one("#log-panel", LogPanel).append_line(message.text)
+        panel = self.query_one("#log-panel", LogPanel)
+        panel.append_line(message.text)
 
     def on_stats_updated(self, message: StatsUpdated) -> None:
         self._update_stats_display(message)
 
     def _update_stats_display(self, message: StatsUpdated | None = None) -> None:
         if message is None:
-            snap = self.controller.snapshot()
-            message = StatsUpdated(
-                running=snap["running"],
-                round_count=snap["round_count"],
-                session_count=snap["session_count"],
-                session_id=snap["session_id"],
-                config_name=snap["config_name"],
-                working_dir=snap["working_dir"],
-                elapsed_seconds=(
-                    __import__("time").monotonic() - snap["start_time"]
-                    if snap["start_time"] > 0 and snap["running"]
-                    else 0.0
-                ),
-            )
+            message = stats_message_from_snapshot(self.controller.snapshot())
         minutes = int(message.elapsed_seconds) // 60
         seconds = int(message.elapsed_seconds) % 60
         elapsed = f"{minutes}:{seconds:02d}"
-        status = i18n.t("status_running") if message.running else i18n.t("status_idle")
+        stats = self.query_one("#stats-bar", StatsBar)
+        if message.running:
+            stats.add_class("running")
+            status = i18n.t("status_running")
+        else:
+            stats.remove_class("running")
+            status = i18n.t("status_idle")
         config = message.config_name or "-"
-        self.query_one("#stats-bar", StatsBar).update(
-            f"{status} | {config} | "
-            f"{i18n.t('stat_rounds')}: {message.round_count} | "
-            f"{i18n.t('stat_sessions')}: {message.session_count} | "
-            f"{i18n.t('stat_elapsed')}: {elapsed} | "
-            f"Session: {message.session_id or '-'}"
+        stats.update(
+            f"{status}  |  {i18n.t('stat_elapsed')}: {elapsed}  |  {config}"
         )
         self.query_one("#btn-start", Button).disabled = message.running
         self.query_one("#btn-stop", Button).disabled = not message.running

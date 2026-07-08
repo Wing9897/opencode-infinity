@@ -30,7 +30,7 @@ def save_state(data: dict[str, Any]) -> None:
 
 
 def get_locale() -> str:
-    return str(load_state().get("locale", "zh-TW"))
+    return str(load_state().get("locale", "en"))
 
 
 def set_locale(locale: str) -> None:
@@ -76,4 +76,20 @@ def get_log_compact() -> bool:
 def set_log_compact(compact: bool) -> None:
     data = load_state()
     data["log_compact"] = compact
+    save_state(data)
+
+
+UI_DENSITIES = ("compact", "normal", "comfortable")
+
+
+def get_ui_density() -> str:
+    value = str(load_state().get("ui_density", "compact"))
+    return value if value in UI_DENSITIES else "compact"
+
+
+def set_ui_density(density: str) -> None:
+    if density not in UI_DENSITIES:
+        return
+    data = load_state()
+    data["ui_density"] = density
     save_state(data)

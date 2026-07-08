@@ -63,6 +63,13 @@ class SmokeTests(unittest.TestCase):
                 sorted(path.name for path in config_dir.glob("*.yaml")),
                 ["article-en.yaml", "codex.yaml", "opencode.yaml"],
             )
+            import yaml
+
+            for name in ("opencode.yaml", "codex.yaml", "article-en.yaml"):
+                content = (config_dir / name).read_text(encoding="utf-8")
+                parsed = yaml.safe_load(content)
+                self.assertIsInstance(parsed.get("prompts"), list)
+                self.assertGreater(len(parsed["prompts"]), 0)
 
     def test_create_factory_templates_overwrites_existing(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -73,7 +80,7 @@ class SmokeTests(unittest.TestCase):
             self.assertEqual(result["errors"], [])
             self.assertEqual(sorted(result["created"]), ["article-en.yaml", "codex.yaml"])
             self.assertEqual(result["overwritten"], ["opencode.yaml"])
-            self.assertIn("連載文章創作", existing.read_text(encoding="utf-8"))
+            self.assertIn("連載文章", existing.read_text(encoding="utf-8"))
 
     def test_resolve_config_path(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -289,7 +296,7 @@ class SmokeTests(unittest.TestCase):
             resolved = self.mod._resolve_execution_working_dir(config)
             self.assertEqual(resolved, Path(tmp).resolve())
 
-    def test_gui_override_working_dir(self) -> None:
+    def test_override_working_dir(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             with tempfile.TemporaryDirectory() as other:
                 config_path = Path(tmp) / "configs" / "codex.yaml"

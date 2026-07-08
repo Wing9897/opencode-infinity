@@ -7,31 +7,22 @@ from textual.widgets import RichLog, Static
 class StatsBar(Static):
     """Display rounds, sessions, and elapsed time."""
 
-    DEFAULT_CSS = """
-    StatsBar {
-        height: 3;
-        padding: 0 1;
-        background: $surface;
-    }
-    """
-
 
 class LogPanel(RichLog):
-    """Scrollable execution log."""
-
-    DEFAULT_CSS = """
-    LogPanel {
-        border: solid $primary;
-        height: 1fr;
-        min-height: 12;
-    }
-    """
+    """Scrollable execution log with plain-text copy support."""
 
     def __init__(self, **kwargs) -> None:
-        super().__init__(highlight=True, markup=True, wrap=True, **kwargs)
+        super().__init__(highlight=False, markup=False, wrap=True, **kwargs)
+        self._plain_lines: list[str] = []
 
-    def append_line(self, text: str) -> None:
-        self.write(text)
+    def append_line(self, text: str, *, plain: str | None = None) -> None:
+        line = plain if plain is not None else text
+        self._plain_lines.append(line)
+        self.write(line)
+
+    def plain_text(self) -> str:
+        return "\n".join(self._plain_lines)
 
     def clear_log(self) -> None:
+        self._plain_lines.clear()
         self.clear()

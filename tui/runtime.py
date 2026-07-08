@@ -4,16 +4,50 @@ from __future__ import annotations
 import logging
 import threading
 import time
-from pathlib import Path
 from typing import Any, Callable, Optional
 
 import opencode_infinity as core
+
+from tui import i18n
+from tui.messages import StatsUpdated
+
+
+def _should_show_cli_line(line: str) -> bool:
+    """Drop opencode internal INFO noise; keep user-visible CLI output."""
+    stripped = line.strip()
+    if not stripped:
+        return False
+    if stripped.startswith("timestamp="):
+        return False
+    return True
+
+
+def stats_message_from_snapshot(snap: dict[str, Any]) -> StatsUpdated:
+    """Build a StatsUpdated message from a RunController snapshot."""
+    elapsed = (
+        time.monotonic() - snap["start_time"]
+        if snap["start_time"] > 0 and snap["running"]
+        else 0.0
+    )
+    return StatsUpdated(
+        running=snap["running"],
+        round_count=snap["round_count"],
+        session_count=snap["session_count"],
+        session_id=snap["session_id"],
+        config_name=snap["config_name"],
+        working_dir=snap["working_dir"],
+        elapsed_seconds=elapsed,
+    )
 
 
 class RunController:
     """Manage a single background execution loop."""
 
-    def __init__(self, on_log: Callable[[str], None], on_stats: Callable[[], None]) -> None:
+    def __init__(
+        self,
+        on_log: Callable[[str, str], None],
+        on_stats: Callable[[], None],
+    ) -> None:
         self._on_log = on_log
         self._on_stats = on_stats
         self._lock = threading.Lock()
@@ -26,10 +60,15 @@ class RunController:
         self.start_time = 0.0
         self._stop_event: Optional[threading.Event] = None
         self._thread: Optional[threading.Thread] = None
+        self._executor: Optional[core.Executor] = None
 
-    def _log(self, message: str) -> None:
-        timestamp = time.strftime("%H:%M:%S")
-        self._on_log(f"[{timestamp}] {message}")
+    def _log_cli(self, line: str) -> None:
+        if _should_show_cli_line(line):
+            self._on_log(line, "cli")
+
+    def _log_event(self, message: str) -> None:
+        """Errors and stop/finish only — keep console quiet."""
+        self._on_log(message, "app")
 
     def _sync_stats(self, loop_stats: core._ExecutionLoopStats) -> None:
         with self._lock:
@@ -46,7 +85,7 @@ class RunController:
     ) -> str:
         with self._lock:
             if self.running:
-                raise RuntimeError("已在執行中")
+                raise RuntimeError(i18n.t("err_already_running"))
             self.running = True
             self.config_name = config_name
             self.session_id = session_id
@@ -63,14 +102,20 @@ class RunController:
         with self._lock:
             self._thread = thread
         thread.start()
+        self._on_stats()
         return session_id
 
     def stop(self) -> None:
         with self._lock:
             stop_event = self._stop_event
+            executor = self._executor
         if stop_event:
             stop_event.set()
-        self._log("⏹ 使用者請求停止")
+        if executor is not None:
+            try:
+                executor.cancel_active()
+            except OSError:
+                pass
 
     def snapshot(self) -> dict[str, Any]:
         with self._lock:
@@ -84,32 +129,6 @@ class RunController:
                 "start_time": self.start_time,
             }
 
-    def _log_draft_status(self, working_dir: Optional[Path]) -> None:
-        base = working_dir if working_dir is not None else Path.cwd()
-        draft = base / "output" / "articles" / "draft.md"
-        if not draft.is_file():
-            return
-        try:
-            size = draft.stat().st_size
-        except OSError as exc:
-            self._log(f"  ⚠️ 無法讀取 draft.md: {exc}")
-            return
-        if size == 0:
-            self._log(
-                "  ⚠️ draft.md 已建立但為空檔。"
-                "這通常不是 exe 權限問題（能建檔代表目錄可寫），"
-                "而是本輪 AI 尚未寫入內容；請確認工作目錄正確並讓下一輪繼續。"
-            )
-            self._log(f"  📁 檔案位置: {draft.resolve()}")
-            return
-        self._log(f"  📝 draft.md 目前 {size} bytes — {draft.resolve()}")
-
-    def _on_round_success(
-        self, round_num: int, result: core.ExecutionResult, working_dir: Optional[Path]
-    ) -> None:
-        self._log(f"  ✅ Round {round_num} 完成 ({result.duration_seconds:.1f}s)")
-        self._log_draft_status(working_dir)
-
     def _run_task(
         self,
         config_name: str,
@@ -117,49 +136,25 @@ class RunController:
         stop_event: threading.Event,
         working_dir_override: Optional[str],
     ) -> None:
-        self._log(f"🚀 啟動執行 - Config: {config_name}, Session: {session_id}")
         try:
             try:
                 runtime = core._bootstrap_runtime(
                     config_name, working_dir_override=working_dir_override
                 )
             except (core.ConfigError, OSError, ValueError) as exc:
-                self._log(f"❌ 設定載入失敗: {exc}")
+                self._log_event(i18n.t("log_config_load_failed", error=exc))
                 return
             except core.CLIAdapterError as exc:
-                self._log(f"❌ CLI 適配器建立失敗: {exc}")
-                if core.sys.platform == "win32":
-                    self._log(
-                        "💡 提示：請確認已安裝 opencode（npm i -g opencode-ai），"
-                        "並重新啟動以載入 PATH。"
-                    )
+                self._log_event(i18n.t("log_cli_adapter_failed", error=exc))
                 return
 
             with self._lock:
                 self.working_dir = (
                     str(runtime.working_dir) if runtime.working_dir else ""
                 )
+                self._executor = runtime.executor
 
-            self._log(f"📄 讀取設定: {runtime.config_path}")
-            self._log(f"✅ 設定載入成功: tool={runtime.config.cli.tool}")
-
-            tool_warning = (
-                core._self_tool_directory_warning(runtime.working_dir)
-                if runtime.working_dir
-                else None
-            )
-            if tool_warning:
-                self._log(f"⚠️ {tool_warning}")
-            if runtime.working_dir:
-                self._log(f"📁 工作目錄: {runtime.working_dir}")
-            else:
-                self._log(f"📁 工作目錄: {Path.cwd()}（沿用啟動目錄）")
-
-            core._log_opencode_adapter_info(runtime.adapter, self._log)
-
-            working_dir = runtime.working_dir
             loop_logger = logging.getLogger("opencode_infinity.tui_loop")
-            cli_log_state = {"window_start": 0.0, "count": 0, "suppressed": 0}
 
             def _on_round_begin(
                 round_num: int,
@@ -171,69 +166,30 @@ class RunController:
                     self.round_count = round_num
                     self.session_id = active_session_id
                 self._on_stats()
-                self._log(
-                    f"▶ Round {round_num} | Session: {active_session_id} | "
-                    f"Prompt: {core.truncate_text(current_prompt, 60)}"
-                )
-                self._log("  ⏳ 正在呼叫 AI CLI（首次回應可能需要數分鐘，請稍候）…")
 
             def _on_cli_output(line: str) -> None:
                 clean = core._strip_ansi(line)
                 if clean.startswith("[stderr] "):
                     clean = clean[9:]
-                clean = clean.strip()
-                if not clean:
-                    return
-                lower = clean.lower()
-                if (
-                    "service=" in lower
-                    and "info" in lower
-                    and not any(
-                        token in lower
-                        for token in ("error", "warn", "fail", "timeout")
-                    )
-                ):
-                    now = time.monotonic()
-                    if now - cli_log_state["window_start"] > 1.0:
-                        if cli_log_state["suppressed"]:
-                            self._log(
-                                f"  | ... opencode 內部日誌 (+{cli_log_state['suppressed']} 行已摺疊)"
-                            )
-                        cli_log_state["window_start"] = now
-                        cli_log_state["count"] = 0
-                        cli_log_state["suppressed"] = 0
-                    if cli_log_state["count"] >= 4:
-                        cli_log_state["suppressed"] += 1
-                        return
-                    cli_log_state["count"] += 1
-                self._log(f"  | {core.truncate_text(clean, 1200)}")
+                self._log_cli(clean)
 
             hooks = core._ExecutionLoopHooks(
                 should_stop=stop_event.is_set,
                 on_round_begin=_on_round_begin,
-                on_round_success=lambda round_num, result: self._on_round_success(
-                    round_num, result, working_dir
-                ),
-                on_round_failure=lambda round_num, result: self._log(
+                on_round_success=lambda round_num, result: self._on_stats(),
+                on_round_failure=lambda round_num, result: self._log_event(
                     core._format_round_failure_message(round_num, result)
                 ),
-                on_session_switched=lambda new_session_id: self._log(
-                    f"✅ 切換到新 Session: {new_session_id}"
+                on_session_switch_failed=lambda message: self._log_event(
+                    i18n.t("log_session_switch_failed", message=message)
                 ),
-                on_session_switch_attempt=lambda: self._log("🔀 觸發 Session 切換..."),
-                on_session_switch_failed=lambda message: self._log(
-                    f"⚠️ Session 切換失敗: {message}"
+                on_max_rounds_reached=lambda max_rounds: self._log_event(
+                    i18n.t("log_max_rounds", max_rounds=max_rounds)
                 ),
-                on_max_rounds_reached=lambda max_rounds: self._log(
-                    f"🏁 已達最大輪次 {max_rounds}，停止執行"
+                on_abort=lambda reason: self._log_event(
+                    i18n.t("log_aborted", reason=reason)
                 ),
-                on_abort=lambda reason: self._log(f"⛔ {reason}，停止執行"),
-                on_reloaded=lambda summary: self._log(f"🔄 設定已熱重載: {summary}"),
-                on_reload_failed=self._log,
-                on_command_preview=lambda command: self._log(
-                    f"  執行命令: {core._format_command_preview(command)}"
-                ),
-                on_token_usage=self._log,
+                on_reload_failed=self._log_event,
                 on_cli_output=_on_cli_output,
                 on_iteration_end=self._sync_stats,
                 interruptible_delay=True,
@@ -251,19 +207,16 @@ class RunController:
             )
             self._sync_stats(stats)
 
-            with self._lock:
-                elapsed = time.monotonic() - self.start_time
-                round_count = self.round_count
-                session_count = self.session_count
-            self._log(
-                f"🏁 執行結束 - 輪次: {round_count}, Session: {session_count}, "
-                f"耗時: {core._format_elapsed_time(elapsed)}"
-            )
+            if stop_event.is_set():
+                self._log_event(i18n.t("log_stopped"))
         except Exception as exc:
-            self._log(f"❌ 執行異常: {type(exc).__name__}: {exc}")
+            self._log_event(
+                i18n.t("log_error", type=type(exc).__name__, message=exc)
+            )
             if getattr(core.sys, "frozen", False):
                 core._desktop_log(f"tui_run_task error: {type(exc).__name__}: {exc}")
         finally:
             with self._lock:
                 self.running = False
+                self._executor = None
             self._on_stats()

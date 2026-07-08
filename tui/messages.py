@@ -7,8 +7,9 @@ from textual.message import Message
 class LogLine(Message):
     """Append a line to the console log panel."""
 
-    def __init__(self, text: str) -> None:
+    def __init__(self, text: str, *, source: str = "cli") -> None:
         self.text = text
+        self.source = source
         super().__init__()
 
 

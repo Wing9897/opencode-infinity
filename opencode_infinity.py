@@ -264,6 +264,9 @@ class RetryError:
     message: str = ""
 
 
+_STOPPED_RETURN_CODE: int = -130
+
+
 @dataclass
 class ExecutionResult:
     """Structured result of a command execution with retry information."""
@@ -275,6 +278,7 @@ class ExecutionResult:
     errors: list[RetryError] = field(default_factory=list)
     stdout_text: str = ""
     stderr_text: str = ""
+    cancelled: bool = False
 
 
 @dataclass
@@ -602,7 +606,7 @@ def _matches_field_type(value: object, field_type: FieldType) -> bool:
 def _load_yaml_mapping_from_text(content: str, *, source: str) -> dict[str, Any]:
     """Parse YAML text and require a mapping at the document root.
 
-    The config loader and GUI both need the same guardrails: parse YAML once,
+    The config loader and TUI both need the same guardrails: parse YAML once,
     accept empty documents, and reject top-level non-mapping values with a
     consistent error message.
     """
@@ -1117,7 +1121,7 @@ def _validate_model_name(model: str) -> None:
 
 
 def _ensure_windows_user_path() -> None:
-    """Merge user-level PATH entries for Windows GUI / frozen builds."""
+    """Merge user-level PATH entries for Windows TUI / frozen builds."""
     if sys.platform != "win32":
         return
     try:
@@ -1516,11 +1520,16 @@ _platform_logger = logging.getLogger("opencode_infinity.executor.platform")
 
 
 def terminate_process(process: subprocess.Popen[Any]) -> None:
-    """Gracefully terminate a subprocess with platform-aware fallback."""
+    """Terminate a subprocess. On Windows use kill() to avoid CTRL_BREAK side effects."""
+    if process.poll() is not None:
+        return
     try:
-        process.terminate()
+        if IS_WINDOWS:
+            process.kill()
+        else:
+            process.terminate()
     except OSError as exc:
-        _platform_logger.debug("terminate_process: terminate() raised OSError: %s", exc)
+        _platform_logger.debug("terminate_process: signal raised OSError: %s", exc)
         return
 
     try:
@@ -1532,10 +1541,29 @@ def terminate_process(process: subprocess.Popen[Any]) -> None:
             _TERMINATE_TIMEOUT_SECONDS,
         )
         try:
-            process.kill()
+            if not IS_WINDOWS:
+                process.kill()
             process.wait()
         except OSError as exc:
             _platform_logger.debug("terminate_process: kill() raised OSError: %s", exc)
+
+
+def _wait_for_process(
+    process: subprocess.Popen[Any],
+    timeout: int,
+    should_stop: Optional[Callable[[], bool]] = None,
+) -> bool:
+    """Poll until the process exits. Returns True if stopped by user."""
+    deadline = time.monotonic() + timeout if timeout > 0 else None
+    while process.poll() is None:
+        if should_stop is not None and should_stop():
+            terminate_process(process)
+            return True
+        if deadline is not None and time.monotonic() >= deadline:
+            terminate_process(process)
+            raise subprocess.TimeoutExpired(process.args, timeout)
+        time.sleep(0.25)
+    return False
 
 
 def get_creation_flags() -> int:
@@ -1763,6 +1791,29 @@ class Executor:
     ) -> None:
         self._sanitizer = sanitizer if sanitizer is not None else InputSanitizer()
         self._working_dir = working_dir
+        self._active_process: Optional[subprocess.Popen[Any]] = None
+        self._process_lock = threading.Lock()
+
+    def cancel_active(self) -> bool:
+        """Terminate the in-flight subprocess, if any."""
+        with self._process_lock:
+            process = self._active_process
+        if process is not None and process.poll() is None:
+            try:
+                terminate_process(process)
+            except OSError:
+                return False
+            return True
+        return False
+
+    def _register_process(self, process: subprocess.Popen[Any]) -> None:
+        with self._process_lock:
+            self._active_process = process
+
+    def _unregister_process(self, process: subprocess.Popen[Any]) -> None:
+        with self._process_lock:
+            if self._active_process is process:
+                self._active_process = None
 
     def _subprocess_cwd(self) -> Optional[str]:
         if self._working_dir is None:
@@ -1777,6 +1828,7 @@ class Executor:
         prompt: Optional[str] = None,
         stdin_input: Optional[str] = None,
         on_output_line: Optional[Callable[[str], None]] = None,
+        should_stop: Optional[Callable[[], bool]] = None,
     ) -> ExecutionResult:
         """Execute a command with retry logic and exponential backoff."""
         start_time = time.monotonic()
@@ -1801,6 +1853,19 @@ class Executor:
         last_stderr = ""
 
         for attempt in range(max_retries + 1):
+            if should_stop is not None and should_stop():
+                duration = time.monotonic() - start_time
+                return ExecutionResult(
+                    success=False,
+                    return_code=_STOPPED_RETURN_CODE,
+                    duration_seconds=duration,
+                    retry_count=attempt,
+                    errors=errors,
+                    stdout_text=last_stdout,
+                    stderr_text=last_stderr,
+                    cancelled=True,
+                )
+
             attempt_timeout = self._calculate_backoff_timeout(timeout, attempt)
 
             try:
@@ -1811,6 +1876,7 @@ class Executor:
                             attempt_timeout,
                             stdin_input=stdin_bytes,
                             on_output_line=on_output_line,
+                            should_stop=should_stop,
                         )
                     )
                     result = subprocess.CompletedProcess(
@@ -1824,6 +1890,18 @@ class Executor:
                         command=resolved_command,
                         timeout=attempt_timeout,
                         stdin_input=stdin_bytes,
+                    )
+                if should_stop is not None and should_stop():
+                    duration = time.monotonic() - start_time
+                    return ExecutionResult(
+                        success=False,
+                        return_code=_STOPPED_RETURN_CODE,
+                        duration_seconds=duration,
+                        retry_count=attempt,
+                        errors=errors,
+                        stdout_text=last_stdout,
+                        stderr_text=last_stderr,
+                        cancelled=True,
                     )
                 last_stdout = self._decode_output(result.stdout)
                 last_stderr = self._decode_output(result.stderr)
@@ -1907,6 +1985,18 @@ class Executor:
                     )
 
             if attempt < max_retries:
+                if should_stop is not None and should_stop():
+                    duration = time.monotonic() - start_time
+                    return ExecutionResult(
+                        success=False,
+                        return_code=_STOPPED_RETURN_CODE,
+                        duration_seconds=duration,
+                        retry_count=attempt,
+                        errors=errors,
+                        stdout_text=last_stdout,
+                        stderr_text=last_stderr,
+                        cancelled=True,
+                    )
                 backoff_wait = min(min(2**attempt, _MAX_BACKOFF_SECONDS), 10)
                 if on_output_line is not None:
                     on_output_line(f"[retry] {backoff_wait}s 後重試...")
@@ -1935,6 +2025,7 @@ class Executor:
         stdin_input: Optional[str] = None,
         prompt: Optional[str] = None,
         on_output_line: Optional[Callable[[str], None]] = None,
+        should_stop: Optional[Callable[[], bool]] = None,
     ) -> ExecutionResult:
         """Execute a command using Popen for stdin pipe support.
 
@@ -1965,6 +2056,7 @@ class Executor:
                     timeout,
                     stdin_input=stdin_bytes,
                     on_output_line=on_output_line,
+                    should_stop=should_stop,
                 )
             except subprocess.TimeoutExpired:
                 duration = time.monotonic() - start_time
@@ -1981,6 +2073,18 @@ class Executor:
                             message=f"Command timed out after {timeout}s",
                         )
                     ],
+                )
+            if should_stop is not None and should_stop():
+                duration = time.monotonic() - start_time
+                return ExecutionResult(
+                    success=False,
+                    return_code=_STOPPED_RETURN_CODE,
+                    duration_seconds=duration,
+                    retry_count=0,
+                    errors=[],
+                    stdout_text=stdout_text,
+                    stderr_text=stderr_text,
+                    cancelled=True,
                 )
             duration = time.monotonic() - start_time
             success = _evaluate_subprocess_success(
@@ -2022,12 +2126,22 @@ class Executor:
                 env=_subprocess_env_for_command(resolved_command),
                 creationflags=get_creation_flags(),
             )
+            self._register_process(process)
             if stdin_bytes and process.stdin:
                 process.stdin.write(stdin_bytes)
                 process.stdin.close()
-            process.wait(timeout=timeout)
+            stopped = _wait_for_process(process, timeout, should_stop=should_stop)
             duration = time.monotonic() - start_time
             return_code = process.returncode if process.returncode is not None else -1
+            if stopped or (should_stop is not None and should_stop()):
+                return ExecutionResult(
+                    success=False,
+                    return_code=_STOPPED_RETURN_CODE,
+                    duration_seconds=duration,
+                    retry_count=0,
+                    errors=[],
+                    cancelled=True,
+                )
             return ExecutionResult(
                 success=return_code == 0,
                 return_code=return_code,
@@ -2086,6 +2200,9 @@ class Executor:
                     )
                 ],
             )
+        finally:
+            if process is not None:
+                self._unregister_process(process)
 
     # --- Private helpers ---
 
@@ -2185,6 +2302,7 @@ class Executor:
         *,
         stdin_input: Optional[bytes] = None,
         on_output_line: Callable[[str], None],
+        should_stop: Optional[Callable[[], bool]] = None,
     ) -> tuple[int, str, str]:
         """Run a command and stream stdout/stderr lines to a callback."""
         process = subprocess.Popen(
@@ -2197,6 +2315,7 @@ class Executor:
             env=_subprocess_env_for_command(command),
             creationflags=get_creation_flags(),
         )
+        self._register_process(process)
         stdout_chunks: list[str] = []
         stderr_chunks: list[str] = []
 
@@ -2239,10 +2358,12 @@ class Executor:
             process.stdin.close()
 
         try:
-            process.wait(timeout=timeout)
+            _wait_for_process(process, timeout, should_stop=should_stop)
         except subprocess.TimeoutExpired:
             terminate_process(process)
             raise
+        finally:
+            self._unregister_process(process)
 
         for thread in readers:
             thread.join(timeout=1.0)
@@ -2571,7 +2692,7 @@ def _resolve_execution_working_dir(
     *,
     override: Optional[str] = None,
 ) -> Optional[Path]:
-    """Resolve subprocess cwd from GUI override or YAML execution.working_dir."""
+    """Resolve subprocess cwd from TUI override or YAML execution.working_dir."""
     raw = _normalize_working_dir_text(override)
     if not raw:
         raw = _normalize_working_dir_text(config.execution.working_dir)
@@ -2663,7 +2784,7 @@ def _desktop_self_check() -> list[str]:
 
 
 def _build_diagnose_report() -> dict[str, Any]:
-    """Collect runtime diagnostics for GUI/API consumers."""
+    """Collect runtime diagnostics for TUI consumers."""
     build_info = _app_build_info()
     opencode_path = _find_cli_tool("opencode")
     opencode_info: Optional[dict[str, str]] = None
@@ -2687,7 +2808,7 @@ def _build_diagnose_report() -> dict[str, Any]:
 
 @dataclass
 class _RuntimeBootstrap:
-    """Shared runtime objects for CLI and GUI execution loops."""
+    """Shared runtime objects for CLI and TUI execution loops."""
 
     config_path: Path
     config_loader: "ConfigLoader"
@@ -2749,9 +2870,12 @@ def _get_user_config_dir() -> Path:
     return base / "OpenCodeInfinity" / "configs"
 
 
-_FACTORY_SEED_CONFIGS: dict[str, str] = {
-    "opencode.yaml": """# OpenCode 出廠範本 · 連載文章創作
-# 每輪只寫一小段，接續前稿繼續寫，不要一輪完結全篇
+_DRAFT_PATH_HINT = "output/articles/draft.md"
+
+
+def _factory_seed_configs() -> dict[str, str]:
+    return {
+    "opencode.yaml": f"""# OpenCode 出廠範本 · 連載文章（輕量 prompt，AI 自行建立檔案與結構）
 cli:
   tool: opencode
 
@@ -2764,45 +2888,21 @@ execution:
   switch_after_rounds: 0
   max_tokens: 128000
   token_threshold: 0.7
-  # working_dir: "D:/my-project"  # 留空則沿用啟動目錄
+  # working_dir: "D:/my-project"
 
 display:
   show_session_id: true
   show_timestamp: true
 
 prompts:
-  - |
-    在 output/articles/ 建立或打開連載草稿 draft.md（已有檔案則讀取，不要重寫）：
-    - 本輪只做：確定主題、列出 4-6 個章節大綱
-    - 撰寫「開篇 + 第一章」約 400-600 字
-    - 文末加上 <!-- CONTINUE: 下一章節標題 --> 標記待寫段落
-    - 禁止本輪寫完全文或結語
-    - 寫入後確認 draft.md 非空且至少 200 字；若為空檔請在本輪內補寫
-  - |
-    打開 draft.md，從 <!-- CONTINUE --> 標記處接續創作：
-    - 本輪只寫下一個章節，約 400-600 字
-    - 語氣與前文一致，開頭 1-2 句自然銜接
-    - 更新 CONTINUE 標記指向下一段
-    - 禁止重寫已有段落，禁止一輪內完結全篇
-  - |
-    繼續擴寫 draft.md：補寫下一章節，或深化目前最薄弱的一段：
-    - 可先列出已完成章節與待寫章節（各一行）
-    - 本輪專注新增內容，不做全篇大改
-    - 若大綱仍有 2 章以上未寫，不要寫結語
-  - |
-    接續創作新的一節（案例、故事或論點展開）：
-    - 僅可微調前文銜接句（最多 2 句），不可整段重寫
-    - 本輪約 400-600 字，保持「進行中」草稿狀態
-    - 更新 CONTINUE 標記
+  - 在 {_DRAFT_PATH_HINT} 開始或接續寫文章。自行決定主題、建立所需資料夾與結構，每輪寫一段即可。
+  - 接續 {_DRAFT_PATH_HINT}，寫下一段內容。
+  - 繼續擴寫 {_DRAFT_PATH_HINT}。
+  - 接續 {_DRAFT_PATH_HINT}，加入案例或深化論點。
 
-summary_prompt: |
-  請用繁體中文總結本輪文章進度（200字內）：
-  1. 本輪寫了哪個章節、約多少字
-  2. 全文目前完成度（已完成/待寫章節）
-  3. 下一輪建議接寫哪一段
+summary_prompt: 簡短總結本輪進度與下一段建議。
 """,
-    "codex.yaml": """# Codex 出廠範本 · 連載文章創作（可搜尋補充資料）
-# 每輪只寫一小段，接續前稿繼續寫，不要一輪就寫完
+    "codex.yaml": f"""# Codex 出廠範本 · 連載文章（輕量 prompt，可搜尋）
 cli:
   tool: codex
   search: true
@@ -2816,44 +2916,21 @@ execution:
   switch_after_rounds: 0
   max_tokens: 128000
   token_threshold: 0.7
-  # working_dir: "D:/my-project"  # 留空則沿用啟動目錄
+  # working_dir: "D:/my-project"
 
 display:
   show_session_id: true
   show_timestamp: true
 
 prompts:
-  - |
-    在 output/articles/ 建立或打開研究型連載草稿 draft.md（已有則接寫）：
-    - 本輪：選定主題、列出 4-6 章大綱，搜尋 2-3 個可靠來源
-    - 撰寫開篇與第一章約 400-600 字，文末附「參考來源」小節
-    - 加上 <!-- CONTINUE: 下一章節標題 -->
-    - 一輪寫不完是正常流程，不要寫結語
-    - 寫入後確認 draft.md 非空且至少 200 字；若為空檔請在本輪內補寫
-  - |
-    接續 draft.md：先搜尋本 chapter 需要的事實、數據或案例，再撰寫下一章約 400-600 字：
-    - 從 CONTINUE 標記處接寫，不重寫前文
-    - 新內容需與已寫段落邏輯連貫
-    - 更新 CONTINUE 標記與參考來源
-  - |
-    繼續擴寫：補寫下一章，或把某個論點寫深一層：
-    - 列出「已完成 / 待寫」章節各一行
-    - 本輪以新增段落為主，避免全篇重構
-    - 尚有 2 章以上未寫時，不要寫結語
-  - |
-    接續創作並補充佐證（搜尋引用、數據或對比例子）：
-    - 本輪約 400-600 字，只允許微調銜接句（最多 2 句）
-    - 保持草稿為連載進行中狀態
-    - 更新 CONTINUE 標記
+  - 在 {_DRAFT_PATH_HINT} 開始或接續寫研究型文章。自行決定主題與結構，需要時搜尋資料，每輪寫一段。
+  - 接續 {_DRAFT_PATH_HINT}，寫下一段並補充所需參考。
+  - 繼續擴寫 {_DRAFT_PATH_HINT}。
+  - 接續 {_DRAFT_PATH_HINT}，深化論點或加入佐證。
 
-summary_prompt: |
-  請用繁體中文總結本輪文章進度（200字內）：
-  1. 本輪新增哪一章、用了哪些資料來源
-  2. 全文完成度與待寫章節
-  3. 下一輪建議接寫方向
+summary_prompt: 簡短總結本輪進度、參考來源與下一段建議。
 """,
-    "article-en.yaml": """# Factory template · serial article writing (English)
-# Write a little each round; continue the draft — do not finish in one round
+    "article-en.yaml": f"""# Factory template · serial article (light prompts)
 cli:
   tool: codex
   search: true
@@ -2867,44 +2944,24 @@ execution:
   switch_after_rounds: 0
   max_tokens: 128000
   token_threshold: 0.7
-  # working_dir: "D:/my-project"  # empty = launch directory
+  # working_dir: "D:/my-project"
 
 display:
   show_session_id: true
   show_timestamp: true
 
 prompts:
-  - |
-    Create or open a serial draft at output/articles/draft.md (read existing file; do not rewrite):
-    - This round only: pick a topic and outline 4-6 chapters
-    - Write the opening plus chapter 1 (~400-600 words)
-    - End with <!-- CONTINUE: next chapter title -->
-    - Do not finish the full article or write a conclusion this round
-    - After writing, verify draft.md is non-empty (at least 200 words); rewrite in-round if empty
-  - |
-    Continue draft.md from the <!-- CONTINUE --> marker:
-    - Write only the next chapter (~400-600 words)
-    - Match tone and add 1-2 bridging sentences
-    - Update the CONTINUE marker
-    - Do not rewrite prior sections or finish the whole piece in one round
-  - |
-    Keep expanding draft.md — add the next chapter or deepen the weakest section:
-    - List completed vs pending chapters (one line each)
-    - Focus on new content, not a full rewrite
-    - If 2+ chapters remain, do not write a conclusion
-  - |
-    Continue with a new section (case study, story, or argument):
-    - You may tweak at most 2 bridging sentences; no full rewrites
-    - ~400-600 words; keep the draft in progress
-    - Update the CONTINUE marker
+  - Start or continue an article at {_DRAFT_PATH_HINT}. Pick your own topic and structure; create folders as needed; write one section per round.
+  - Continue {_DRAFT_PATH_HINT} with the next section.
+  - Keep expanding {_DRAFT_PATH_HINT}.
+  - Continue {_DRAFT_PATH_HINT} — add examples or deepen an argument.
 
-summary_prompt: |
-  Summarize this round's article progress in English (max 200 words):
-  1. Which chapter was added and approximate word count
-  2. Overall completion (done vs pending chapters)
-  3. Suggested focus for the next round
+summary_prompt: Brief summary of this round and suggested next section.
 """,
-}
+    }
+
+
+_FACTORY_SEED_CONFIGS: dict[str, str] = _factory_seed_configs()
 
 
 def _create_factory_templates(target_dir: Path) -> dict[str, list[str]]:
@@ -3082,7 +3139,7 @@ def _build_round_command(
     """Build the command for the current round.
 
     Round 1 starts a fresh run, later rounds continue the active session.
-    Keeping this logic in one place avoids the CLI and GUI loops drifting apart.
+    Keeping this logic in one place avoids the CLI and TUI loops drifting apart.
     """
     if round_num == 1:
         return adapter.build_run_command(prompt)
@@ -3099,6 +3156,7 @@ def _execute_prompt_round(
     timeout: int,
     max_retries: int,
     on_output_line: Optional[Callable[[str], None]] = None,
+    should_stop: Optional[Callable[[], bool]] = None,
 ) -> ExecutionResult:
     """Execute one prompt round using the adapter's preferred transport."""
     command = _build_round_command(adapter, round_num, session_id, prompt)
@@ -3109,6 +3167,7 @@ def _execute_prompt_round(
             stdin_input=prompt,
             prompt=prompt,
             on_output_line=on_output_line,
+            should_stop=should_stop,
         )
     return executor.run_with_retry(
         command=command,
@@ -3116,6 +3175,7 @@ def _execute_prompt_round(
         max_retries=max_retries,
         prompt=prompt,
         on_output_line=on_output_line,
+        should_stop=should_stop,
     )
 
 
@@ -3220,17 +3280,29 @@ class _ExecutionLoopStats:
     session_id: str = ""
 
 
+def _hook_noop_str(_: str) -> None:
+    return None
+
+
+def _hook_noop_int(_: int) -> None:
+    return None
+
+
+def _hook_noop_round(_: int, __: ExecutionResult) -> None:
+    return None
+
+
 @dataclass
 class _ExecutionLoopHooks:
-    """Callbacks that let CLI and GUI reuse the same execution loop."""
+    """Callbacks that let CLI and TUI reuse the same execution loop."""
 
     should_stop: Callable[[], bool]
     on_round_begin: Callable[[int, str, AppConfig, str], None]
-    on_round_success: Callable[[int, ExecutionResult], None]
-    on_round_failure: Callable[[int, ExecutionResult], None]
-    on_session_switched: Callable[[str], None]
-    on_session_switch_failed: Callable[[str], None]
-    on_max_rounds_reached: Callable[[int], None]
+    on_round_success: Callable[[int, ExecutionResult], None] = _hook_noop_round
+    on_round_failure: Callable[[int, ExecutionResult], None] = _hook_noop_round
+    on_session_switched: Callable[[str], None] = _hook_noop_str
+    on_session_switch_failed: Callable[[str], None] = _hook_noop_str
+    on_max_rounds_reached: Callable[[int], None] = _hook_noop_int
     on_reloaded: Optional[Callable[[str], None]] = None
     on_reload_failed: Optional[Callable[[str], None]] = None
     on_command_preview: Optional[Callable[[list[str]], None]] = None
@@ -3253,7 +3325,7 @@ def _run_execution_loop(
     app_logger: logging.Logger,
     hooks: _ExecutionLoopHooks,
 ) -> tuple[_ExecutionLoopStats, AppConfig, CLIAdapter, SessionManager]:
-    """Run the shared prompt execution loop for CLI and GUI modes."""
+    """Run the shared prompt execution loop for CLI and TUI modes."""
     stats = _ExecutionLoopStats(session_id=session_id)
     prompt_index = 0
     active_config = config
@@ -3320,7 +3392,11 @@ def _run_execution_loop(
             timeout=active_config.execution.timeout,
             max_retries=active_config.execution.max_retries,
             on_output_line=hooks.on_cli_output,
+            should_stop=hooks.should_stop,
         )
+
+        if result.cancelled or hooks.should_stop():
+            break
 
         if result.success:
             stats.success_count += 1
