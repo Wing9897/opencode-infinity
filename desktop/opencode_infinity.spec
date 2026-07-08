@@ -1,7 +1,12 @@
 # -*- mode: python ; coding: utf-8 -*-
 from pathlib import Path
 
+from PyInstaller.utils.hooks import collect_data_files, collect_submodules
+
 ROOT = Path(SPECPATH).resolve().parent
+
+textual_hidden = collect_submodules("textual")
+rich_hidden = collect_submodules("rich")
 
 a = Analysis(
     [str(ROOT / "desktop" / "launcher.py")],
@@ -9,31 +14,13 @@ a = Analysis(
     binaries=[],
     datas=[
         (str(ROOT / "desktop" / "build-meta.json"), "."),
+        *collect_data_files("textual"),
     ],
     hiddenimports=[
         "opencode_infinity",
-        "tui",
-        "tui.app",
-        "tui.services",
-        "tui.runtime",
-        "tui.i18n",
-        "tui.state",
-        "tui.messages",
-        "tui.screens.console",
-        "tui.screens.editor",
-        "tui.screens.aigen_modal",
-        "tui.widgets.log_panel",
-        "textual",
-        "textual.app",
-        "textual.widgets",
-        "textual.widget",
-        "textual.screen",
-        "textual.containers",
-        "textual.binding",
-        "textual.message",
-        "rich",
-        "rich.console",
-        "rich.text",
+        *collect_submodules("tui"),
+        *textual_hidden,
+        *rich_hidden,
         "yaml",
     ],
     hookspath=[],
