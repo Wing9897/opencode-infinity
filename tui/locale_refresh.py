@@ -3,10 +3,9 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from textual.widgets import Button, Checkbox, Collapsible, Input, Label, Select, Static
-from textual.widgets._tabbed_content import ContentTab
+from textual.widgets import Button, Checkbox, Collapsible, Input, Label, Select, Static, Tab
 
-from tui import i18n, state as ui_state
+from tui import i18n
 
 if TYPE_CHECKING:
     from tui.app import InfinityApp
@@ -14,29 +13,16 @@ if TYPE_CHECKING:
 
 def refresh_app_locale(app: InfinityApp) -> None:
     try:
-        app.query_one("#brand-mark", Static).update(
-            f"∞ {i18n.t('brand_subtitle')}"
-        )
-        density = app.query_one("#density-indicator", Static)
-        density.update(
-            f"[dim]{i18n.t('label_layout')}[/] "
-            f"{i18n.t(f'density_{ui_state.get_ui_density()}')}"
-        )
-        locale = i18n.get_locale()
-        app.query_one("#locale-indicator", Static).update(
-            f"[dim]{i18n.t('label_language')}[/] "
-            f"{i18n.t('locale_zh') if locale == 'zh-TW' else i18n.t('locale_en')}"
-        )
-        app._update_round_indicator()
+        app._update_tab_status()
     except Exception:
         return
 
-    for pane_id, key in (
-        ("tab-console", "tab_console"),
-        ("tab-editor", "tab_editor"),
+    for tab_id, key in (
+        ("tab-console-label", "tab_console"),
+        ("tab-editor-label", "tab_editor"),
     ):
         try:
-            tab = app.query_one(f"#{ContentTab.add_prefix(pane_id)}")
+            tab = app.query_one(f"#{tab_id}", Tab)
             tab.label = i18n.t(key)
         except Exception:
             pass

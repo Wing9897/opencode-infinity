@@ -22,6 +22,25 @@ def _should_show_cli_line(line: str) -> bool:
     return True
 
 
+def format_round_failure_message(round_num: int, result: core.ExecutionResult) -> str:
+    """Format a failed-round log line using the active UI locale."""
+    base = i18n.t(
+        "log_round_failed",
+        round=round_num,
+        code=result.return_code,
+        retries=result.retry_count,
+    )
+    hints = [
+        i18n.t(f"log_round_hint_{code}")
+        for code in core._round_failure_hint_codes(result)
+    ]
+    if result.errors:
+        hints.append(result.errors[-1].message)
+    if hints:
+        return f"{base} — {'; '.join(hints)}"
+    return base
+
+
 def stats_message_from_snapshot(snap: dict[str, Any]) -> StatsUpdated:
     """Build a StatsUpdated message from a RunController snapshot."""
     elapsed = (
@@ -178,7 +197,7 @@ class RunController:
                 on_round_begin=_on_round_begin,
                 on_round_success=lambda round_num, result: self._on_stats(),
                 on_round_failure=lambda round_num, result: self._log_event(
-                    core._format_round_failure_message(round_num, result)
+                    format_round_failure_message(round_num, result)
                 ),
                 on_session_switch_failed=lambda message: self._log_event(
                     i18n.t("log_session_switch_failed", message=message)

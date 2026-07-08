@@ -388,6 +388,51 @@ class SmokeTests(unittest.TestCase):
             config = self.mod.ConfigLoader(config_dir / "opencode.yaml").load()
             self.assertTrue(config.display.show_token_usage)
 
+    def test_round_failure_hint_codes_cli_incompatible(self) -> None:
+        result = self.mod.ExecutionResult(
+            success=False,
+            return_code=1,
+            duration_seconds=1.0,
+            retry_count=2,
+            stderr_text="positionals:\n  CMD\noptions:\n  -h",
+        )
+        self.assertEqual(
+            self.mod._round_failure_hint_codes(result), ["cli_incompatible"]
+        )
+
+    def test_round_failure_hint_codes_session_not_found(self) -> None:
+        result = self.mod.ExecutionResult(
+            success=False,
+            return_code=1,
+            duration_seconds=1.0,
+            retry_count=0,
+            stderr_text="Error: session not found",
+        )
+        self.assertEqual(
+            self.mod._round_failure_hint_codes(result), ["session_not_found"]
+        )
+
+    def test_format_round_failure_message_i18n(self) -> None:
+        from tui import i18n
+        from tui.runtime import format_round_failure_message
+
+        result = self.mod.ExecutionResult(
+            success=False,
+            return_code=2,
+            duration_seconds=1.0,
+            retry_count=1,
+            stderr_text="session not found",
+        )
+        i18n.set_locale("en")
+        message = format_round_failure_message(3, result)
+        self.assertIn("Round 3 failed", message)
+        self.assertIn("Session cannot resume", message)
+
+        i18n.set_locale("zh-TW")
+        message = format_round_failure_message(3, result)
+        self.assertIn("第 3 輪失敗", message)
+        self.assertIn("Session 無法接續", message)
+
 
 if __name__ == "__main__":
     unittest.main()

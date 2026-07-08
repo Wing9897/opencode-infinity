@@ -7,63 +7,54 @@ Screen {
     background: $background;
 }
 
-#top-bar {
+#tab-bar-row {
     height: 3;
-    padding: 0 2;
-    background: $surface-darken-1;
-    border-bottom: solid $primary 40%;
-}
-
-#brand-mark {
-    width: 1fr;
-    color: $accent;
-    text-style: bold;
-}
-
-#locale-indicator {
-    width: auto;
-    color: $text-muted;
-    padding: 0 1;
-    margin: 0 0 0 2;
-}
-
-#density-indicator {
-    width: auto;
-    color: $text-muted;
-    padding: 0 1;
-}
-
-#round-indicator {
-    width: auto;
-    min-width: 10;
-    color: $text-muted;
-    padding: 0 1;
-    margin: 0 1;
-    text-style: bold;
-}
-
-#round-indicator.running {
-    color: $success;
-}
-
-TabbedContent {
-    height: 1fr;
-}
-
-TabbedContent > ContentTabs {
     background: $surface;
-    dock: top;
-    height: 3;
+    border-bottom: solid $primary 40%;
+    align: left middle;
 }
 
-TabbedContent > ContentTabs Tab {
+#main-tabs {
+    width: 1fr;
+    height: 3;
+    background: transparent;
+    padding: 0;
+}
+
+#main-tabs Tab {
     color: $text-muted;
 }
 
-TabbedContent > ContentTabs Tab.-active {
+#main-tabs Tab.-active {
     color: $accent;
     text-style: bold;
     background: $primary 15%;
+}
+
+#tab-status {
+    width: auto;
+    min-width: 20;
+    height: 3;
+    padding: 0 2;
+    color: $text-muted;
+    text-style: bold;
+    content-align: center middle;
+}
+
+#tab-status.running {
+    color: $success;
+}
+
+#main-switcher {
+    height: 1fr;
+}
+
+#console-panel {
+    height: 1fr;
+}
+
+#editor-panel {
+    height: 1fr;
 }
 
 TabPane {
@@ -116,13 +107,8 @@ TabPane {
 }
 
 /* ── Density: compact (default) ── */
-.density-compact #top-bar {
-    height: 1;
-    padding: 0 1;
-}
-
-.density-compact TabbedContent > ContentTabs {
-    height: 1;
+.density-compact #tab-bar-row {
+    height: 3;
 }
 
 .density-compact TabPane {
@@ -153,11 +139,6 @@ TabPane {
 .density-compact #prompt-list {
     min-height: 3;
     padding: 0;
-}
-
-.density-compact StatsBar {
-    height: 1;
-    margin: 0 0 0 0;
 }
 
 .density-compact .log-header {
@@ -191,10 +172,6 @@ TabPane {
     height: 4;
 }
 
-.density-normal StatsBar {
-    height: 3;
-}
-
 /* ── Density: comfortable ── */
 .density-comfortable TabPane {
     padding: 1 3;
@@ -216,11 +193,6 @@ TabPane {
 
 .density-comfortable #prompt-list {
     min-height: 8;
-}
-
-.density-comfortable StatsBar {
-    height: 3;
-    margin: 0 0 1 0;
 }
 
 .density-comfortable LogPanel {
@@ -340,22 +312,7 @@ TabPane {
     color: $accent;
 }
 
-/* ── Stats & logs ── */
-StatsBar {
-    height: 3;
-    padding: 0 1;
-    margin: 0 0 1 0;
-    background: $surface;
-    border: solid $primary 35%;
-    color: $text-muted;
-}
-
-StatsBar.running {
-    border: solid $success 50%;
-    background: $surface;
-    color: $text;
-}
-
+/* ── Logs ── */
 .log-header {
     color: $accent;
     text-style: bold;

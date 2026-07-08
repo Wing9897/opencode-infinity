@@ -17,7 +17,7 @@ from tui.locale_refresh import (
 from tui.messages import ConfigListChanged, LogLine, StatsUpdated
 from tui.runtime import RunController, stats_message_from_snapshot
 from tui.services import ServiceError
-from tui.widgets.log_panel import LogPanel, StatsBar
+from tui.widgets.log_panel import LogPanel
 
 
 class ConsolePanel(Vertical):
@@ -61,7 +61,6 @@ class ConsolePanel(Vertical):
                 id="console-required-hint",
                 classes="required-hint",
             )
-            yield StatsBar(id="stats-bar")
             with Collapsible(
                 title=i18n.t("advanced"),
                 collapsed=True,
@@ -116,7 +115,7 @@ class ConsolePanel(Vertical):
         _set_input_placeholder("session-id", "placeholder_session", self)
         self._reload_config_options()
         self._refresh_required_hints()
-        self._update_stats_display()
+        self._sync_run_controls()
 
     def _reload_config_options(self) -> None:
         """Refresh config dropdown labels without re-triggering selection logic."""
@@ -134,7 +133,7 @@ class ConsolePanel(Vertical):
         saved = ui_state.get_selected_config()
         if saved:
             self._select_config(saved)
-        self._update_stats_display()
+        self._sync_run_controls()
         self._refresh_required_hints()
         self.query_one("#log-panel", LogPanel).append_line(i18n.t("log_empty"))
 
@@ -293,25 +292,11 @@ class ConsolePanel(Vertical):
         panel.append_line(message.text)
 
     def on_stats_updated(self, message: StatsUpdated) -> None:
-        self._update_stats_display(message)
+        self._sync_run_controls(message)
 
-    def _update_stats_display(self, message: StatsUpdated | None = None) -> None:
+    def _sync_run_controls(self, message: StatsUpdated | None = None) -> None:
         if message is None:
             message = stats_message_from_snapshot(self.controller.snapshot())
-        minutes = int(message.elapsed_seconds) // 60
-        seconds = int(message.elapsed_seconds) % 60
-        elapsed = f"{minutes}:{seconds:02d}"
-        stats = self.query_one("#stats-bar", StatsBar)
-        if message.running:
-            stats.add_class("running")
-            status = i18n.t("status_running")
-        else:
-            stats.remove_class("running")
-            status = i18n.t("status_idle")
-        config = message.config_name or "-"
-        stats.update(
-            f"{status}  |  {i18n.t('stat_elapsed')}: {elapsed}  |  {config}"
-        )
         self.query_one("#btn-start", Button).disabled = message.running
         self.query_one("#btn-stop", Button).disabled = not message.running
 

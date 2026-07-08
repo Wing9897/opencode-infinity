@@ -1,11 +1,7 @@
 """Reusable TUI widgets."""
 from __future__ import annotations
 
-from textual.widgets import RichLog, Static
-
-
-class StatsBar(Static):
-    """Display rounds, sessions, and elapsed time."""
+from textual.widgets import RichLog
 
 
 class LogPanel(RichLog):

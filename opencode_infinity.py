@@ -1680,25 +1680,16 @@ def _subprocess_failure_message(
     return f"Command exited with code {return_code}"
 
 
-def _format_round_failure_message(round_num: int, result: ExecutionResult) -> str:
-    base = (
-        f"  ❌ Round {round_num} 失敗 "
-        f"(code={result.return_code}, retries={result.retry_count})"
-    )
+def _round_failure_hint_codes(result: ExecutionResult) -> list[str]:
+    """Return machine-readable hint codes for a failed round."""
     combined = result.stdout_text + result.stderr_text
-    hints: list[str] = []
     lower = combined.lower()
+    hints: list[str] = []
     if "positionals:" in lower and "options:" in lower:
-        hints.append(
-            "CLI 參數不相容（可能用了此版本不支援的 flag；請看啟動日誌中的 OpenCode 版本）"
-        )
+        hints.append("cli_incompatible")
     elif "session not found" in lower:
-        hints.append("Session 無法接續，請確認工作目錄固定且 Round 1 已成功")
-    if result.errors:
-        hints.append(result.errors[-1].message)
-    if hints:
-        return f"{base} — {'; '.join(hints)}"
-    return base
+        hints.append("session_not_found")
+    return hints
 
 
 _TOKEN_STATS_LINE_RE: re.Pattern[str] = re.compile(

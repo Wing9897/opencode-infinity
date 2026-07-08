@@ -145,6 +145,9 @@ MESSAGES: dict[str, dict[str, str]] = {
         "log_stopped": "已停止",
         "log_error": "錯誤：{type}：{message}",
         "err_already_running": "已在執行中",
+        "log_round_failed": "  ❌ 第 {round} 輪失敗 (code={code}, retries={retries})",
+        "log_round_hint_cli_incompatible": "CLI 參數不相容（可能用了此版本不支援的 flag；請看啟動日誌中的 OpenCode 版本）",
+        "log_round_hint_session_not_found": "Session 無法接續，請確認工作目錄固定且 Round 1 已成功",
     },
     "en": {
         "app_title": "OpenCode Infinity",
@@ -285,6 +288,9 @@ MESSAGES: dict[str, dict[str, str]] = {
         "log_stopped": "Stopped",
         "log_error": "Error: {type}: {message}",
         "err_already_running": "Already running",
+        "log_round_failed": "  ❌ Round {round} failed (code={code}, retries={retries})",
+        "log_round_hint_cli_incompatible": "CLI flags incompatible (unsupported option for this version; check OpenCode version in startup logs)",
+        "log_round_hint_session_not_found": "Session cannot resume; keep working dir fixed and ensure Round 1 succeeded",
     },
 }
 

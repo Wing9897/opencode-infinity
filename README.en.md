@@ -6,6 +6,19 @@ Set your prompts once — the tool keeps calling the AI for you, handling retrie
 
 **Languages:** [中文](README.md) · English
 
+## What tasks fit a loop?
+
+**Open-ended goals work best.** Infinity shines when there is no single finish line and each round can build on the last, for example:
+
+- Serial fiction or articles (append the next section to `draft.md`)
+- Ongoing scraping, summarization, or content curation
+- Continuous simulation, exploration, or variant generation
+- Long-running refactors, documentation, or test fixes
+
+These tasks have no fixed “correct answer”; looping accumulates progress over time.
+
+By contrast, **single-shot, deterministic work** (one-off calculations, a script that should run once, a clear build/deploy step) gains little from repeating the loop — the AI tends to redo the same thing. Set `execution.max_rounds` to cap rounds and stop when done, or use looping only when you need retries or batched steps.
+
 ## Installation
 
 ```bash
@@ -25,9 +38,10 @@ python /path/to/opencode_infinity.py
 
 Launches a terminal UI with:
 
-- **Console** — config picker, start/stop, working-dir override, live logs, stats, diagnose
+- **Console** — config picker, start/stop, working-dir override, live logs, diagnose
 - **Config editor** — visual YAML editor, AI prompt generator, save configs
-- **Shortcuts** — `Ctrl+S` save editor, `Ctrl+Q` quit (stop the task first if running)
+- **Tab bar status** — on the right of Console / Config Editor: `rounds | status | elapsed`
+- **Shortcuts** — `Ctrl+S` save editor, `Ctrl+L` switch language, `Ctrl+Shift+C` copy log, `Ctrl+Q` quit (stop the task first if running)
 
 Optional flag:
 
@@ -119,7 +133,7 @@ summary_prompt: "Summary prompt before session switch"
 | 2 | YAML `execution.working_dir` | Default in the config file |
 | 3 | Launch directory | Used when both above are empty |
 
-The console shows which path will be used at start time.
+The console shows which path will be used at start time; rounds and elapsed time appear on the tab bar while running.
 
 ### Platform feature matrix
 
@@ -142,7 +156,7 @@ The console shows which path will be used at start time.
 - Hot reload: edit YAML while running; changes apply on the next round
 - Input sanitization: guards against command injection
 - Live output: Codex reasoning streams to the terminal
-- Textual TUI: console + config editor + AI prompt generation
+- Textual TUI: console + config editor + AI prompt generation + live tab-bar status
 
 ## Important
 

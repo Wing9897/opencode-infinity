@@ -15,6 +15,7 @@ if str(ROOT) not in sys.path:
 class TuiTests(unittest.IsolatedAsyncioTestCase):
     async def test_app_mounts(self) -> None:
         import opencode_infinity as core
+        from textual.widgets import Static
         from tui.app import InfinityApp
 
         with tempfile.TemporaryDirectory() as tmp:
@@ -24,6 +25,8 @@ class TuiTests(unittest.IsolatedAsyncioTestCase):
                 await pilot.pause()
                 self.assertIsNotNone(app.query_one("#console-panel"))
                 self.assertIsNotNone(app.query_one("#editor-panel"))
+                indicator = app.query_one("#tab-status", Static)
+                self.assertIn("輪次", str(indicator.content))
                 self.assertFalse(app.controller.snapshot()["running"])
 
 

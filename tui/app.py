@@ -8,7 +8,14 @@ import opencode_infinity as core
 from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal
-from textual.widgets import Footer, Header, Static, TabbedContent, TabPane
+from textual.widgets import (
+    ContentSwitcher,
+    Footer,
+    Header,
+    Static,
+    Tab,
+    Tabs,
+)
 
 from tui import i18n, state as ui_state
 from tui.locale_refresh import refresh_app_locale
@@ -91,19 +98,16 @@ class InfinityApp(App):
 
     def compose(self) -> ComposeResult:
         yield Header(show_clock=True)
-        with Horizontal(id="top-bar"):
-            yield Static(
-                f"∞ {i18n.t('brand_subtitle')}",
-                id="brand-mark",
+        with Horizontal(id="tab-bar-row"):
+            yield Tabs(
+                Tab(i18n.t("tab_console"), id="tab-console-label"),
+                Tab(i18n.t("tab_editor"), id="tab-editor-label"),
+                id="main-tabs",
             )
-            yield Static("", id="density-indicator")
-            yield Static("", id="round-indicator")
-            yield Static("", id="locale-indicator")
-        with TabbedContent():
-            with TabPane(i18n.t("tab_console"), id="tab-console"):
-                yield ConsolePanel(self.controller, id="console-panel")
-            with TabPane(i18n.t("tab_editor"), id="tab-editor"):
-                yield EditorPanel(id="editor-panel")
+            yield Static("", id="tab-status")
+        with ContentSwitcher(initial="console-panel", id="main-switcher"):
+            yield ConsolePanel(self.controller, id="console-panel")
+            yield EditorPanel(id="editor-panel")
         yield Footer()
 
     def on_mount(self) -> None:
@@ -111,38 +115,48 @@ class InfinityApp(App):
         if locale in ("zh-TW", "en"):
             i18n.set_locale(locale)
         self._apply_density()
-        self._update_locale_indicator()
-        self._update_round_indicator()
+        self._update_tab_status()
         self._refresh_bindings()
         self.set_interval(1.0, self._tick_stats)
 
-    def _locale_display(self, locale: str) -> str:
-        return i18n.t("locale_zh") if locale == "zh-TW" else i18n.t("locale_en")
+    @staticmethod
+    def _format_elapsed(seconds: float) -> str:
+        total = int(seconds)
+        return f"{total // 60}:{total % 60:02d}"
 
-    def _update_locale_indicator(self) -> None:
-        locale = i18n.get_locale()
-        indicator = self.query_one("#locale-indicator", Static)
-        indicator.update(
-            f"[dim]{i18n.t('label_language')}[/] {self._locale_display(locale)}"
+    def _update_tab_status(self, message: StatsUpdated | None = None) -> None:
+        if message is None:
+            message = stats_message_from_snapshot(self.controller.snapshot())
+        status = (
+            i18n.t("status_running")
+            if message.running
+            else i18n.t("status_idle")
         )
-
-    def _update_round_indicator(
-        self,
-        *,
-        running: bool | None = None,
-        round_count: int | None = None,
-    ) -> None:
-        snap = self.controller.snapshot()
-        if running is None:
-            running = snap["running"]
-        if round_count is None:
-            round_count = snap["round_count"]
-        indicator = self.query_one("#round-indicator", Static)
-        indicator.update(f"{i18n.t('stat_rounds')}: {round_count}")
-        if running:
+        parts = [f"{i18n.t('stat_rounds')}: {message.round_count}", status]
+        if message.running:
+            parts.append(
+                f"{i18n.t('stat_elapsed')}: {self._format_elapsed(message.elapsed_seconds)}"
+            )
+        indicator = self.query_one("#tab-status", Static)
+        indicator.update("  |  ".join(parts))
+        if message.running:
             indicator.add_class("running")
         else:
             indicator.remove_class("running")
+
+    def on_tabs_tab_activated(self, event: Tabs.TabActivated) -> None:
+        if event.tab is None:
+            return
+        targets = {
+            "tab-console-label": "console-panel",
+            "tab-editor-label": "editor-panel",
+        }
+        target = targets.get(event.tab.id or "")
+        if target:
+            self.query_one("#main-switcher", ContentSwitcher).current = target
+
+    def _locale_display(self, locale: str) -> str:
+        return i18n.t("locale_zh") if locale == "zh-TW" else i18n.t("locale_en")
 
     def action_toggle_locale(self) -> None:
         current = i18n.get_locale()
@@ -155,8 +169,7 @@ class InfinityApp(App):
             if not self.is_mounted:
                 return
             refresh_app_locale(self)
-            self._update_locale_indicator()
-            self._update_round_indicator()
+            self._update_tab_status()
             self._refresh_bindings()
             self.notify(
                 i18n.t(
@@ -176,10 +189,6 @@ class InfinityApp(App):
         for name in ui_state.UI_DENSITIES:
             screen.remove_class(f"density-{name}")
         screen.add_class(f"density-{density}")
-        indicator = self.query_one("#density-indicator", Static)
-        indicator.update(
-            f"[dim]{i18n.t('label_layout')}[/] {self._density_label(density)}"
-        )
 
     def action_density_up(self) -> None:
         order = ui_state.UI_DENSITIES
@@ -222,10 +231,7 @@ class InfinityApp(App):
         console.on_log_line(message)
 
     def on_stats_updated(self, message: StatsUpdated) -> None:
-        self._update_round_indicator(
-            running=message.running,
-            round_count=message.round_count,
-        )
+        self._update_tab_status(message)
         console = self.query_one("#console-panel", ConsolePanel)
         console.on_stats_updated(message)
 
