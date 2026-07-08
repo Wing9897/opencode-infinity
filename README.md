@@ -43,6 +43,16 @@ python /path/to/opencode_infinity.py
 - **分頁列狀態** — 「控制台 / 設定編輯器」同一列右側顯示 `輪次 | 狀態 | 耗時`
 - **快捷鍵** — `Ctrl+S` 保存編輯器、`Ctrl+L` 切換語言、`Ctrl+Shift+C` 複製日誌、`Ctrl+Q` 退出（執行中需先停止）
 
+### 介面預覽
+
+**控制台** — 選設定檔、啟動/停止、即時日誌與分頁列狀態
+
+![控制台](image/console.png)
+
+**設定編輯器** — 圖形化編輯 YAML 與循環提示詞
+
+![設定編輯器](image/config.png)
+
 可選參數：
 
 ```bash

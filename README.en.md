@@ -43,6 +43,16 @@ Launches a terminal UI with:
 - **Tab bar status** — on the right of Console / Config Editor: `rounds | status | elapsed`
 - **Shortcuts** — `Ctrl+S` save editor, `Ctrl+L` switch language, `Ctrl+Shift+C` copy log, `Ctrl+Q` quit (stop the task first if running)
 
+### Screenshots
+
+**Console** — config picker, start/stop, live logs, and tab-bar status
+
+![Console](image/console.png)
+
+**Config editor** — visual YAML editor and rotating prompts
+
+![Config editor](image/config.png)
+
 Optional flag:
 
 ```bash
