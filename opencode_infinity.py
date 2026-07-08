@@ -1319,6 +1319,32 @@ def _find_cli_tool(name: str) -> Optional[str]:
     return shutil.which(name)
 
 
+_opencode_auto_flag_cache: dict[str, bool] = {}
+
+
+def _opencode_cli_supports_auto(executable: str) -> bool:
+    """Return True when this opencode build exposes `run --auto`."""
+    cached = _opencode_auto_flag_cache.get(executable)
+    if cached is not None:
+        return cached
+    supports = False
+    try:
+        result = subprocess.run(
+            [executable, "run", "--help"],
+            capture_output=True,
+            text=True,
+            timeout=15,
+            creationflags=get_creation_flags(),
+            stdin=subprocess.DEVNULL,
+        )
+        help_text = (result.stdout or "") + (result.stderr or "")
+        supports = "--auto" in help_text
+    except (OSError, subprocess.TimeoutExpired, ValueError):
+        supports = False
+    _opencode_auto_flag_cache[executable] = supports
+    return supports
+
+
 class OpenCodeAdapter(CLIAdapter):
     """Adapter for the OpenCode CLI tool."""
 
@@ -1334,6 +1360,7 @@ class OpenCodeAdapter(CLIAdapter):
                 "Please ensure opencode is installed and available in PATH."
             )
         self._executable = executable
+        self._supports_auto = _opencode_cli_supports_auto(executable)
         if config.model is not None:
             _validate_model_name(config.model)
 
@@ -1348,7 +1375,9 @@ class OpenCodeAdapter(CLIAdapter):
 
     def _headless_flags(self) -> list[str]:
         """Flags for unattended subprocess runs (auto-approve permission prompts)."""
-        return ["--auto"]
+        if self._supports_auto:
+            return ["--auto"]
+        return []
 
     def _validate_prompt(self, prompt: str) -> None:
         length = len(prompt)
@@ -1703,6 +1732,8 @@ def _subprocess_env_for_command(command: list[str]) -> dict[str, str]:
     if _is_opencode_command(command):
         for key in _OPENCODE_DESKTOP_ENV_KEYS:
             env.pop(key, None)
+        if not _opencode_cli_supports_auto(command[0]):
+            env["OPENCODE_PERMISSION"] = '{"*":"allow"}'
     return env
 
 

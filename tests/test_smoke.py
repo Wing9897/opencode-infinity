@@ -104,7 +104,6 @@ class SmokeTests(unittest.TestCase):
                 "/usr/bin/opencode",
                 "run",
                 "--print-logs",
-                "--auto",
                 "-m",
                 "opencode/deepseek-v4-flash-free",
                 "hi",
@@ -117,9 +116,20 @@ class SmokeTests(unittest.TestCase):
         cmd = adapter.build_session_command("ses_not_real", "next prompt")
         self.assertEqual(
             cmd,
-            ["/usr/bin/opencode", "run", "--print-logs", "--auto", "-c", "next prompt"],
+            ["/usr/bin/opencode", "run", "--print-logs", "-c", "next prompt"],
         )
         self.assertNotIn("ses_not_real", cmd)
+
+    def test_opencode_headless_permission_env_when_no_auto_flag(self) -> None:
+        with patch.object(self.mod, "_opencode_cli_supports_auto", return_value=False):
+            env = self.mod._subprocess_env_for_command(["opencode", "run"])
+        self.assertEqual(env["OPENCODE_PERMISSION"], '{"*":"allow"}')
+
+    def test_opencode_headless_uses_auto_flag_when_supported(self) -> None:
+        with patch.object(self.mod.shutil, "which", return_value="/usr/bin/opencode"):
+            with patch.object(self.mod, "_opencode_cli_supports_auto", return_value=True):
+                adapter = self.mod.OpenCodeAdapter(self.mod.CLIConfig(tool="opencode"))
+        self.assertEqual(adapter.build_run_command("hi"), ["/usr/bin/opencode", "run", "--print-logs", "--auto", "hi"])
 
     def test_subprocess_env_strips_opencode_desktop_vars(self) -> None:
         with patch.dict(
