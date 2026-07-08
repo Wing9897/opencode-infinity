@@ -3489,9 +3489,11 @@ def _gui_log(message: str) -> None:
                 client_queue.put_nowait(formatted)
             except queue.Empty:
                 pass
-    print(formatted, file=sys.stderr)
     if getattr(sys, "frozen", False):
+        # Windowed PyInstaller builds have no console; stderr writes can block forever.
         _desktop_log(formatted)
+    else:
+        _eprint(formatted)
 
 
 def _gui_run_task(
