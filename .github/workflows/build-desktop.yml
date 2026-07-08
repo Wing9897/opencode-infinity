@@ -7,12 +7,13 @@ on:
       - "README.md"
       - "README.en.md"
       - "docs/**"
+      - "scripts/run_tui_smoke_round.py"
   workflow_dispatch:
     inputs:
       release_tag:
-        description: "Existing tag to release (e.g. v1.0.0). Only used for manual runs."
+        description: "Existing tag to release (e.g. v1.1.0). Only used for manual runs."
         required: false
-        default: "v1.0.0"
+        default: "v1.1.0"
         type: string
 
 concurrency:
@@ -46,6 +47,13 @@ jobs:
           PYTHONUTF8: "1"
         run: python -m unittest discover -s tests -v
 
+      - name: Verify TUI entry imports
+        env:
+          PYTHONUTF8: "1"
+        run: |
+          python -c "import opencode_infinity; from tui.app import InfinityApp; print('tui ok')"
+          python -c "import opencode_infinity; opencode_infinity._configure_stdio_encoding(); print('core ok')"
+
       - name: Detect existing version tags
         id: version_state
         if: github.event_name == 'push'
@@ -63,7 +71,7 @@ jobs:
         uses: mathieudutour/github-tag-action@v6.2
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
-          default_bump: patch
+          default_bump: minor
           custom_tag: ${{ steps.version_state.outputs.has_tags == 'false' && '1.0.0' || '' }}
 
       - name: Write build metadata
@@ -86,15 +94,15 @@ jobs:
       - name: Verify build output
         shell: pwsh
         run: |
-          $artifacts = Get-ChildItem dist/*.exe
-          if (-not $artifacts) { throw 'No executable found in dist/' }
-          $artifacts | Format-Table Name, Length
+          $exe = Get-ChildItem dist/OpenCode-Infinity.exe -ErrorAction SilentlyContinue
+          if (-not $exe) { throw 'Expected dist/OpenCode-Infinity.exe' }
+          $exe | Format-Table Name, Length
 
       - name: Upload build artifact
         uses: actions/upload-artifact@v4
         with:
           name: OpenCode-Infinity
-          path: dist/*.exe
+          path: dist/OpenCode-Infinity.exe
           if-no-files-found: error
 
       - name: Create GitHub Release
@@ -103,6 +111,14 @@ jobs:
           tag_name: ${{ github.event_name == 'workflow_dispatch' && inputs.release_tag || steps.tag_version.outputs.new_tag }}
           name: Release ${{ github.event_name == 'workflow_dispatch' && inputs.release_tag || steps.tag_version.outputs.new_tag }}
           generate_release_notes: true
+          body: |
+            ## OpenCode Infinity TUI
+
+            - Unified **Textual TUI** interface (console + config editor)
+            - Removed browser GUI (`--gui`), Flask, and pywebview desktop shell
+            - Windows exe: `OpenCode-Infinity.exe` (console TUI)
+
+            **Usage:** double-click the exe or run `python opencode_infinity.py` from source.
           make_latest: true
-          files: dist/*.exe
+          files: dist/OpenCode-Infinity.exe
           fail_on_unmatched_files: true

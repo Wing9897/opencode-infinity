@@ -63,7 +63,7 @@ pyinstaller desktop/opencode_infinity.spec --noconfirm
 | macOS | `~/Library/Application Support/OpenCodeInfinity/configs/` |
 | Linux | `~/.config/OpenCodeInfinity/configs/` |
 
-首次啟動不會自動建立設定檔。請在 GUI 點 **「建立範本」**，會建立或**覆蓋**以下內建種子：
+首次啟動不會自動建立設定檔。請在 TUI 點 **「建立範本」**，會建立或**覆蓋**以下內建種子：
 
 | 檔案 | 說明 |
 |------|------|

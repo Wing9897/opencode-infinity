@@ -7,6 +7,7 @@ on:
     branches: ["main"]
     paths-ignore:
       - "README.md"
+      - "README.en.md"
       - "docs/**"
 
 concurrency:
@@ -35,7 +36,9 @@ jobs:
           PYTHONUTF8: "1"
         run: python -m unittest discover -s tests -v
 
-      - name: Verify desktop module import
+      - name: Verify TUI entry imports
         env:
           PYTHONUTF8: "1"
-        run: python -c "import opencode_infinity; opencode_infinity._configure_stdio_encoding(); print('ok')"
+        run: |
+          python -c "import opencode_infinity; from tui.app import InfinityApp; print('tui ok')"
+          python -c "import opencode_infinity; opencode_infinity._configure_stdio_encoding(); print('core ok')"

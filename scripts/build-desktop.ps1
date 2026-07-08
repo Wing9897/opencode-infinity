@@ -1,4 +1,4 @@
-# Build OpenCode Infinity desktop exe locally (same output as CI).
+# Build OpenCode Infinity TUI exe locally (same output as CI).
 $ErrorActionPreference = "Stop"
 $Root = Split-Path -Parent $PSScriptRoot
 Set-Location $Root
@@ -17,4 +17,4 @@ Set-Content -Path "desktop/build-meta.json" -Value $meta -Encoding utf8
 
 pyinstaller desktop/opencode_infinity.spec --noconfirm --clean
 
-Get-ChildItem dist/*.exe | Format-Table Name, Length
+Get-ChildItem dist/OpenCode-Infinity.exe | Format-Table Name, Length

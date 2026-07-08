@@ -63,7 +63,7 @@ Config files live in the user directory by default (shared by source and desktop
 | macOS | `~/Library/Application Support/OpenCodeInfinity/configs/` |
 | Linux | `~/.config/OpenCodeInfinity/configs/` |
 
-Configs are **not** created automatically on first launch. In the GUI, click **Create templates** to generate or **overwrite** these built-in seeds:
+Configs are **not** created automatically on first launch. In the TUI, click **Create templates** to generate or **overwrite** these built-in seeds:
 
 | File | Description |
 |------|-------------|
