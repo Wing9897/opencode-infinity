@@ -104,11 +104,61 @@ class SmokeTests(unittest.TestCase):
                 "/usr/bin/opencode",
                 "run",
                 "--print-logs",
+                "--auto",
                 "-m",
                 "opencode/deepseek-v4-flash-free",
                 "hi",
             ],
         )
+
+    def test_opencode_session_command_uses_continue(self) -> None:
+        with patch.object(self.mod.shutil, "which", return_value="/usr/bin/opencode"):
+            adapter = self.mod.OpenCodeAdapter(self.mod.CLIConfig(tool="opencode"))
+        cmd = adapter.build_session_command("ses_not_real", "next prompt")
+        self.assertEqual(
+            cmd,
+            ["/usr/bin/opencode", "run", "--print-logs", "--auto", "-c", "next prompt"],
+        )
+        self.assertNotIn("ses_not_real", cmd)
+
+    def test_subprocess_env_strips_opencode_desktop_vars(self) -> None:
+        with patch.dict(
+            os.environ,
+            {
+                "OPENCODE_SERVER_PASSWORD": "secret",
+                "OPENCODE_SERVER_USERNAME": "user",
+                "OPENCODE_CLIENT": "desktop",
+                "PATH": "/usr/bin",
+            },
+            clear=False,
+        ):
+            env = self.mod._subprocess_env_for_command(["opencode", "run"])
+            self.assertNotIn("OPENCODE_SERVER_PASSWORD", env)
+            self.assertNotIn("OPENCODE_SERVER_USERNAME", env)
+            self.assertNotIn("OPENCODE_CLIENT", env)
+            codex_env = self.mod._subprocess_env_for_command(["codex", "exec"])
+            self.assertEqual(codex_env["OPENCODE_SERVER_PASSWORD"], "secret")
+
+    def test_stderr_indicates_failure(self) -> None:
+        self.assertTrue(
+            self.mod._stderr_indicates_failure("ERROR Session not found: ses_123")
+        )
+        self.assertTrue(self.mod._stderr_indicates_failure("NotFoundError: missing"))
+        self.assertFalse(self.mod._stderr_indicates_failure("completed successfully"))
+
+    def test_evaluate_subprocess_success(self) -> None:
+        self.assertTrue(self.mod._evaluate_subprocess_success(0, ""))
+        self.assertFalse(
+            self.mod._evaluate_subprocess_success(0, "Session not found: ses_1")
+        )
+        self.assertFalse(self.mod._evaluate_subprocess_success(1, ""))
+
+    def test_build_round_command_opencode_round2(self) -> None:
+        with patch.object(self.mod.shutil, "which", return_value="/usr/bin/opencode"):
+            adapter = self.mod.OpenCodeAdapter(self.mod.CLIConfig(tool="opencode"))
+        cmd = self.mod._build_round_command(adapter, 2, "ses_fake", "continue writing")
+        self.assertIn("-c", cmd)
+        self.assertNotIn("-s", cmd)
 
     def test_gui_log_broadcasts_to_all_subscribers(self) -> None:
         q1 = self.mod._gui_log_subscribe()

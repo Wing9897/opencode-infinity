@@ -1346,6 +1346,10 @@ class OpenCodeAdapter(CLIAdapter):
         """Flags that make headless subprocess runs emit progress on stderr."""
         return ["--print-logs"]
 
+    def _headless_flags(self) -> list[str]:
+        """Flags for unattended subprocess runs (auto-approve permission prompts)."""
+        return ["--auto"]
+
     def _validate_prompt(self, prompt: str) -> None:
         length = len(prompt)
         if length < self._MIN_PROMPT_LENGTH:
@@ -1357,16 +1361,25 @@ class OpenCodeAdapter(CLIAdapter):
 
     def build_run_command(self, prompt: str) -> list[str]:
         self._validate_prompt(prompt)
-        return [self._executable, "run", *self._stream_flags(), *self._model_flags(), prompt]
-
-    def build_session_command(self, session_id: str, prompt: str) -> list[str]:
-        self._validate_prompt(prompt)
         return [
             self._executable,
             "run",
             *self._stream_flags(),
-            "-s",
-            session_id,
+            *self._headless_flags(),
+            *self._model_flags(),
+            prompt,
+        ]
+
+    def build_session_command(self, session_id: str, prompt: str) -> list[str]:
+        self._validate_prompt(prompt)
+        # OpenCode assigns its own session IDs on `run`. Infinity's ses_* IDs are
+        # not valid; use --continue to resume the last session in this directory.
+        return [
+            self._executable,
+            "run",
+            *self._stream_flags(),
+            *self._headless_flags(),
+            "-c",
             *self._model_flags(),
             prompt,
         ]
@@ -1664,6 +1677,51 @@ _executor_logger = logging.getLogger("opencode_infinity.executor.runner")
 
 _MAX_BACKOFF_SECONDS: int = 3600
 
+_OPENCODE_DESKTOP_ENV_KEYS: tuple[str, ...] = (
+    "OPENCODE_SERVER_PASSWORD",
+    "OPENCODE_SERVER_USERNAME",
+    "OPENCODE_CLIENT",
+)
+
+_SUBPROCESS_STDERR_FAILURE_PATTERNS: tuple[str, ...] = (
+    "session not found",
+    "notfounderror",
+)
+
+
+def _is_opencode_command(command: list[str]) -> bool:
+    if not command:
+        return False
+    executable = Path(command[0])
+    stem = executable.stem.lower()
+    return stem == "opencode"
+
+
+def _subprocess_env_for_command(command: list[str]) -> dict[str, str]:
+    """Build subprocess env, stripping OpenCode Desktop vars for CLI isolation."""
+    env = os.environ.copy()
+    if _is_opencode_command(command):
+        for key in _OPENCODE_DESKTOP_ENV_KEYS:
+            env.pop(key, None)
+    return env
+
+
+def _stderr_indicates_failure(stderr_text: str) -> bool:
+    lower = stderr_text.lower()
+    return any(pattern in lower for pattern in _SUBPROCESS_STDERR_FAILURE_PATTERNS)
+
+
+def _evaluate_subprocess_success(return_code: int, stderr_text: str) -> bool:
+    if return_code != 0:
+        return False
+    return not _stderr_indicates_failure(stderr_text)
+
+
+def _subprocess_failure_message(return_code: int, stderr_text: str) -> str:
+    if return_code == 0 and _stderr_indicates_failure(stderr_text):
+        return "Command exited 0 but stderr indicates failure (e.g. Session not found)"
+    return f"Command exited with code {return_code}"
+
 
 class Executor:
     """Executes subprocess commands with retry, timeout, and cleanup."""
@@ -1743,7 +1801,7 @@ class Executor:
                         )
                     last_stdout = self._decode_output(result.stdout)
                     last_stderr = self._decode_output(result.stderr)
-                    if result.returncode == 0:
+                    if _evaluate_subprocess_success(result.returncode, last_stderr):
                         duration = time.monotonic() - start_time
                         return ExecutionResult(
                             success=True,
@@ -1759,7 +1817,9 @@ class Executor:
                         attempt=attempt + 1,
                         timestamp=utc_now_iso(),
                         return_code=result.returncode,
-                        message=f"Command exited with code {result.returncode}",
+                        message=_subprocess_failure_message(
+                            result.returncode, last_stderr
+                        ),
                     )
                     errors.append(error)
                     _executor_logger.warning(
@@ -1905,20 +1965,23 @@ class Executor:
                         ],
                     )
                 duration = time.monotonic() - start_time
+                success = _evaluate_subprocess_success(return_code, stderr_text)
                 return ExecutionResult(
-                    success=return_code == 0,
+                    success=success,
                     return_code=return_code,
                     duration_seconds=duration,
                     retry_count=0,
                     errors=(
                         []
-                        if return_code == 0
+                        if success
                         else [
                             RetryError(
                                 attempt=1,
                                 timestamp=utc_now_iso(),
                                 return_code=return_code,
-                                message=f"Command exited with code {return_code}",
+                                message=_subprocess_failure_message(
+                                    return_code, stderr_text
+                                ),
                             )
                         ]
                     ),
@@ -1936,6 +1999,7 @@ class Executor:
                     stderr=subprocess.PIPE if capture_output else None,
                     shell=False,
                     cwd=self._subprocess_cwd(),
+                    env=_subprocess_env_for_command(resolved_command),
                     creationflags=get_creation_flags(),
                 )
                 if capture_output:
@@ -1950,27 +2014,32 @@ class Executor:
                     process.wait(timeout=timeout)
                     stdout_data, stderr_data = b"", b""
                 duration = time.monotonic() - start_time
+                stderr_text = self._decode_output(stderr_data)
+                return_code = (
+                    process.returncode if process.returncode is not None else -1
+                )
+                success = _evaluate_subprocess_success(return_code, stderr_text)
                 return ExecutionResult(
-                    success=process.returncode == 0,
-                    return_code=process.returncode
-                    if process.returncode is not None
-                    else -1,
+                    success=success,
+                    return_code=return_code,
                     duration_seconds=duration,
                     retry_count=0,
                     errors=(
                         []
-                        if process.returncode == 0
+                        if success
                         else [
                             RetryError(
                                 attempt=1,
                                 timestamp=utc_now_iso(),
-                                return_code=process.returncode,
-                                message=f"Command exited with code {process.returncode}",
+                                return_code=return_code,
+                                message=_subprocess_failure_message(
+                                    return_code, stderr_text
+                                ),
                             )
                         ]
                     ),
                     stdout_text=self._decode_output(stdout_data),
-                    stderr_text=self._decode_output(stderr_data),
+                    stderr_text=stderr_text,
                 )
 
             except subprocess.TimeoutExpired:
@@ -2105,6 +2174,7 @@ class Executor:
             shell=False,
             timeout=timeout,
             cwd=self._subprocess_cwd(),
+            env=_subprocess_env_for_command(command),
             **stdin_kwargs,
             creationflags=get_creation_flags(),
         )
@@ -2125,6 +2195,7 @@ class Executor:
             stderr=subprocess.PIPE,
             shell=False,
             cwd=self._subprocess_cwd(),
+            env=_subprocess_env_for_command(command),
             creationflags=get_creation_flags(),
         )
         stdout_chunks: list[str] = []
