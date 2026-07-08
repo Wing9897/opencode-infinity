@@ -3579,6 +3579,8 @@ def _gui_run_task(
             )
             _gui_log("  ⏳ 正在呼叫 AI CLI（首次回應可能需要數分鐘，請稍候）…")
 
+        cli_log_state = {"window_start": 0.0, "count": 0, "suppressed": 0}
+
         def _on_gui_cli_output(line: str) -> None:
             clean = _strip_ansi(line)
             if clean.startswith("[stderr] "):
@@ -3586,6 +3588,25 @@ def _gui_run_task(
             clean = clean.strip()
             if not clean:
                 return
+            lower = clean.lower()
+            if (
+                "service=" in lower
+                and "info" in lower
+                and not any(token in lower for token in ("error", "warn", "fail", "timeout"))
+            ):
+                now = time.monotonic()
+                if now - cli_log_state["window_start"] > 1.0:
+                    if cli_log_state["suppressed"]:
+                        _gui_log(
+                            f"  | ... opencode 內部日誌 (+{cli_log_state['suppressed']} 行已摺疊)"
+                        )
+                    cli_log_state["window_start"] = now
+                    cli_log_state["count"] = 0
+                    cli_log_state["suppressed"] = 0
+                if cli_log_state["count"] >= 4:
+                    cli_log_state["suppressed"] += 1
+                    return
+                cli_log_state["count"] += 1
             _gui_log(f"  | {truncate_text(clean, 1200)}")
 
         hooks = _ExecutionLoopHooks(

@@ -296,8 +296,11 @@ function hideLogEmpty() {
     if (logEmpty) logEmpty.hidden = true;
 }
 
-function addLog(msg) {
-    hideLogEmpty();
+const LOG_FLUSH_BATCH_SIZE = 40;
+let logPending = [];
+let logFlushScheduled = false;
+
+function buildLogLine(msg) {
     const div = document.createElement('div');
     let cls = '';
     if (msg.includes('\u2705') || msg.includes('完成') || msg.includes('complete')) cls = ' log-success';
@@ -308,12 +311,34 @@ function addLog(msg) {
     else if (msg.includes('  | ')) cls = ' log-cli';
     div.className = cls;
     div.textContent = msg;
-    logPanel.appendChild(div);
+    return div;
+}
+
+function flushLogPending() {
+    logFlushScheduled = false;
+    if (logPending.length === 0) return;
+    hideLogEmpty();
+    const fragment = document.createDocumentFragment();
+    const batch = logPending.splice(0, LOG_FLUSH_BATCH_SIZE);
+    batch.forEach((msg) => fragment.appendChild(buildLogLine(msg)));
+    logPanel.appendChild(fragment);
     if (logAutoScroll) logPanel.scrollTop = logPanel.scrollHeight;
     while (logPanel.children.length > 501) {
         const first = logPanel.firstElementChild;
         if (first && first.id !== 'log-empty') first.remove();
     }
+    if (logPending.length > 0) scheduleLogFlush();
+}
+
+function scheduleLogFlush() {
+    if (logFlushScheduled) return;
+    logFlushScheduled = true;
+    requestAnimationFrame(flushLogPending);
+}
+
+function addLog(msg) {
+    logPending.push(msg);
+    scheduleLogFlush();
 }
 
 function connectSSE() {
@@ -356,8 +381,8 @@ function formatElapsedSeconds(totalSeconds) {
 }
 
 function startElapsedTicker() {
+    if (elapsedTicker) return;
     elapsedStartMs = Date.now();
-    if (elapsedTicker) clearInterval(elapsedTicker);
     elapsedTicker = setInterval(() => {
         if (!appRunning) return;
         const seconds = Math.floor((Date.now() - elapsedStartMs) / 1000);
@@ -374,7 +399,11 @@ function updateStatus() {
     apiFetch('/api/status').then((data) => {
         document.getElementById('stat-rounds').textContent = data.round_count || 0;
         document.getElementById('stat-sessions').textContent = data.session_count || 0;
-        document.getElementById('stat-elapsed').textContent = data.elapsed || '0:00';
+        // Keep client-side ticker authoritative while running to avoid UI freezes
+        // when status polling stalls under heavy log traffic.
+        if (!elapsedTicker) {
+            document.getElementById('stat-elapsed').textContent = data.elapsed || '0:00';
+        }
         const wasRunning = appRunning;
         appRunning = !!data.running;
         activeConfigName = data.running ? (data.config_name || '') : '';
@@ -394,6 +423,9 @@ function updateStatus() {
             scheduleStatusPoll();
             if (appRunning) startElapsedTicker();
             else stopElapsedTicker();
+        }
+        if (!appRunning) {
+            document.getElementById('stat-elapsed').textContent = data.elapsed || '0:00';
         }
     }).catch(() => {
         appConnected = false;
