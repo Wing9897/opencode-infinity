@@ -43,6 +43,7 @@
                 <div class="action-group" role="group" aria-label="Actions">
                     <button class="js-create-templates-btn btn-secondary" type="button" data-i18n="btnCreateTemplates">建立範本</button>
                     <button id="refresh-configs-btn" class="btn-secondary btn-icon" type="button" data-i18n-title="refreshConfigs" title="重新載入設定檔列表" aria-label="Refresh">↻</button>
+                    <button id="diagnose-btn" class="btn-secondary" type="button" data-i18n="btnDiagnose">🔍 診斷</button>
                     <button id="start-btn" class="btn-primary" type="button" data-i18n="btnStart">▶ 啟動</button>
                     <button id="stop-btn" class="btn-danger" type="button" data-i18n="btnStop" disabled>⏹ 停止</button>
                 </div>
@@ -133,7 +134,7 @@
                                 <div class="field-grid field-grid-2">
                                     <div class="field-group">
                                         <label class="field-label" for="ed-cli-tool" data-i18n="labelTool">CLI 工具</label>
-                                        <select id="ed-cli-tool" onchange="editorUpdateCli()"><option value="opencode">OpenCode</option><option value="claude">Claude</option><option value="codex">Codex</option><option value="copilot">Copilot</option></select>
+                                        <select id="ed-cli-tool" onchange="editorUpdateCli()"><option value="opencode">OpenCode</option><option value="claude">Claude (experimental)</option><option value="codex">Codex</option><option value="copilot">Copilot (experimental)</option></select>
                                     </div>
                                 </div>
                                 <div class="field-group">
@@ -170,6 +171,14 @@
                                     <div class="field-group"><label class="field-label" for="ed-exec-retries" data-i18n="labelRetries">重試</label><input type="number" id="ed-exec-retries" value="5" min="0"></div>
                                     <div class="field-group"><label class="field-label" for="ed-exec-rounds" data-i18n="labelMaxRounds">輪次</label><input type="number" id="ed-exec-rounds" value="0" min="0" data-i18n-placeholder="placeholderRounds" placeholder="0 = 無限"></div>
                                     <div class="field-group"><label class="field-label" for="ed-exec-switch-rounds" data-i18n="labelSwitchRounds">切換輪次</label><input type="number" id="ed-exec-switch-rounds" value="0" min="0" data-i18n-placeholder="placeholderSwitchRounds" placeholder="0 = 不切換"></div>
+                                    <div class="field-group">
+                                        <label class="field-label" for="ed-exec-switch-strategy" data-i18n="labelSwitchStrategy">切換策略</label>
+                                        <select id="ed-exec-switch-strategy">
+                                            <option value="auto" data-i18n="switchStrategyAuto">自動</option>
+                                            <option value="token" data-i18n="switchStrategyToken">Token 閾值</option>
+                                            <option value="rounds" data-i18n="switchStrategyRounds">輪次</option>
+                                        </select>
+                                    </div>
                                     <div class="field-group field-group-checkbox"><label class="option-chip"><input type="checkbox" id="ed-exec-continue" checked> <span data-i18n="labelContinueOnError">錯誤時繼續</span></label></div>
                                 </div>
                                 <div class="field-grid field-grid-2">

@@ -254,6 +254,7 @@ class DisplayConfig:
 
     show_session_id: bool = True
     show_timestamp: bool = True
+    show_token_usage: bool = True
 
 
 @dataclass(frozen=True)
@@ -508,6 +509,7 @@ EXECUTION_DEFAULTS: dict[str, Any] = {
 DISPLAY_DEFAULTS: dict[str, Any] = {
     "show_session_id": True,
     "show_timestamp": True,
+    "show_token_usage": True,
 }
 
 PROMPTS_DEFAULT: list[str] = ["繼續工作"]
@@ -577,6 +579,7 @@ EXECUTION_SCHEMA: dict[str, FieldSchema] = {
 DISPLAY_SCHEMA: dict[str, FieldSchema] = {
     "show_session_id": FieldSchema(field_type=FieldType.BOOL, required=False),
     "show_timestamp": FieldSchema(field_type=FieldType.BOOL, required=False),
+    "show_token_usage": FieldSchema(field_type=FieldType.BOOL, required=False),
 }
 
 PROMPTS_SCHEMA: FieldSchema = FieldSchema(field_type=FieldType.LIST, required=False)
@@ -1085,6 +1088,9 @@ class ConfigLoader:
             show_timestamp=raw.get(
                 "show_timestamp", DISPLAY_DEFAULTS["show_timestamp"]
             ),
+            show_token_usage=raw.get(
+                "show_token_usage", DISPLAY_DEFAULTS["show_token_usage"]
+            ),
         )
 
 
@@ -1328,10 +1334,11 @@ class OpenCodeAdapter(CLIAdapter):
         ]
 
     def build_export_command(self, session_id: str) -> Optional[list[str]]:
-        return [self._executable, "export", session_id]
+        # OpenCode session IDs are managed internally; Infinity's ses_* IDs are invalid.
+        return None
 
     def build_stats_command(self) -> list[str]:
-        return [self._executable, "stats"]
+        return [self._executable, "stats", "--project", ""]
 
     @property
     def supports_token_stats(self) -> bool:
@@ -1687,6 +1694,66 @@ def _format_round_failure_message(round_num: int, result: ExecutionResult) -> st
     if hints:
         return f"{base} — {'; '.join(hints)}"
     return base
+
+
+_TOKEN_STATS_LINE_RE: re.Pattern[str] = re.compile(
+    r"^\s*(Input|Output|Cache Read|Cache Write)\s+([\d,.]+)\s*([KMG])?\s*$",
+    re.IGNORECASE | re.MULTILINE,
+)
+_TOKEN_SUFFIX_MULTIPLIERS: dict[str, int] = {
+    "K": 1_000,
+    "M": 1_000_000,
+    "G": 1_000_000_000,
+}
+
+
+def _parse_opencode_stats_tokens(output_text: str) -> Optional[int]:
+    """Parse total token counts from `opencode stats` table output."""
+    total = 0
+    found = False
+    for match in _TOKEN_STATS_LINE_RE.finditer(output_text):
+        found = True
+        value = float(match.group(2).replace(",", ""))
+        suffix = (match.group(3) or "").upper()
+        total += int(value * _TOKEN_SUFFIX_MULTIPLIERS.get(suffix, 1))
+    return total if found else None
+
+
+def _format_command_preview(command: list[str]) -> str:
+    """Format a subprocess command for logs, truncating only the prompt tail."""
+    if not command:
+        return ""
+    if len(command) == 1:
+        return command[0]
+    head = command[:-1]
+    prompt = command[-1]
+    return f"{' '.join(head)} {truncate_text(prompt, 240)}"
+
+
+def _build_token_usage_message(
+    adapter: CLIAdapter, executor: Executor, config: AppConfig
+) -> Optional[str]:
+    if not config.display.show_token_usage or not adapter.supports_token_stats:
+        return None
+    stats_command: Optional[list[str]] = None
+    if hasattr(adapter, "build_stats_command"):
+        stats_command = getattr(adapter, "build_stats_command")()
+    if stats_command is None:
+        return None
+    result = executor.run_with_retry(command=stats_command, timeout=30, max_retries=0)
+    if not result.success:
+        return None
+    tokens = _parse_opencode_stats_tokens(result.stdout_text + result.stderr_text)
+    if tokens is None:
+        return None
+    max_tokens = config.execution.max_tokens
+    if max_tokens <= 0:
+        return f"  📊 Token 用量: {tokens:,}"
+    ratio = clamp(tokens / max_tokens, 0.0, 1.0)
+    return (
+        f"  📊 Token 用量: {tokens:,} / {max_tokens:,} "
+        f"({ratio * 100:.1f}%)"
+    )
 
 
 def _is_opencode_command(command: list[str]) -> bool:
@@ -2357,10 +2424,12 @@ class SessionManager:
             max_tokens = self._config.execution.max_tokens
             if max_tokens <= 0:
                 return None
-            estimated_tokens_per_round = 3000
-            estimated_usage = self._round_count * estimated_tokens_per_round
-            ratio = estimated_usage / max_tokens
-            return clamp(ratio, 0.0, 1.0)
+            tokens = _parse_opencode_stats_tokens(
+                result.stdout_text + result.stderr_text
+            )
+            if tokens is None:
+                return None
+            return clamp(tokens / max_tokens, 0.0, 1.0)
         except (ValueError, ZeroDivisionError):
             return None
 
@@ -2581,24 +2650,28 @@ def _app_build_info() -> dict[str, str]:
 _desktop_self_check_cache: Optional[list[str]] = None
 
 
-def _desktop_self_check() -> list[str]:
-    """Run lightweight environment checks for frozen desktop builds."""
+def _runtime_self_check() -> list[str]:
+    """Run environment checks for desktop/source builds."""
     global _desktop_self_check_cache
     if _desktop_self_check_cache is not None:
         return _desktop_self_check_cache
 
     issues: list[str] = []
-    if not getattr(sys, "frozen", False):
-        _desktop_self_check_cache = issues
-        return issues
-
     _ensure_windows_user_path()
     opencode = _find_cli_tool("opencode")
     if opencode is None:
-        issues.append("找不到 opencode CLI（請 npm i -g opencode-ai 後重啟桌面版）")
+        issues.append("找不到 opencode CLI（請 npm i -g opencode-ai 後重啟）")
     else:
         caps = _probe_opencode_cli(opencode)
-        _desktop_log(f"Self-check: OpenCode {caps.version} ({caps.headless_mode})")
+        if getattr(sys, "frozen", False):
+            _desktop_log(
+                f"Self-check: OpenCode {caps.version} ({caps.headless_mode})"
+            )
+        if not caps.supports_auto:
+            issues.append(
+                f"OpenCode {caps.version} 較舊（不支援 --auto），"
+                "建議執行: npm update -g opencode-ai"
+            )
     for key in _OPENCODE_DESKTOP_ENV_KEYS:
         if os.environ.get(key):
             issues.append(
@@ -2606,6 +2679,33 @@ def _desktop_self_check() -> list[str]:
             )
     _desktop_self_check_cache = issues
     return issues
+
+
+def _desktop_self_check() -> list[str]:
+    return _runtime_self_check()
+
+
+def _build_diagnose_report() -> dict[str, Any]:
+    """Collect runtime diagnostics for GUI/API consumers."""
+    build_info = _app_build_info()
+    opencode_path = _find_cli_tool("opencode")
+    opencode_info: Optional[dict[str, str]] = None
+    if opencode_path:
+        caps = _probe_opencode_cli(opencode_path)
+        opencode_info = {
+            "path": opencode_path,
+            "version": caps.version,
+            "headless_mode": caps.headless_mode,
+            "supports_auto": str(caps.supports_auto),
+        }
+    return {
+        "ok": True,
+        "build": build_info,
+        "config_dir": str(get_tasks_config_dir()),
+        "working_dir": str(Path.cwd()),
+        "opencode": opencode_info,
+        "issues": _runtime_self_check(),
+    }
 
 
 @dataclass
@@ -3213,6 +3313,7 @@ class _ExecutionLoopHooks:
     on_reload_failed: Optional[Callable[[str], None]] = None
     on_command_preview: Optional[Callable[[list[str]], None]] = None
     on_cli_output: Optional[Callable[[str], None]] = None
+    on_token_usage: Optional[Callable[[str], None]] = None
     on_iteration_end: Optional[Callable[[_ExecutionLoopStats], None]] = None
     on_session_switch_attempt: Optional[Callable[[], None]] = None
     on_abort: Optional[Callable[[str], None]] = None
@@ -3302,6 +3403,12 @@ def _run_execution_loop(
         if result.success:
             stats.success_count += 1
             hooks.on_round_success(round_num, result)
+            if hooks.on_token_usage is not None:
+                token_message = _build_token_usage_message(
+                    active_adapter, executor, active_config
+                )
+                if token_message:
+                    hooks.on_token_usage(token_message)
         else:
             stats.fail_count += 1
             hooks.on_round_failure(round_num, result)
@@ -3555,6 +3662,7 @@ def _run(args: Optional[list[str]] = None) -> None:
             result.return_code,
             result.retry_count,
         ),
+        on_token_usage=lambda message: _eprint(message),
         on_session_switched=_on_session_switched,
         on_session_switch_failed=lambda message: app_logger.warning(
             "Session switch failed: %s", message
@@ -3810,8 +3918,9 @@ def _gui_run_task(
             on_reloaded=lambda summary: _gui_log(f"🔄 設定已熱重載: {summary}"),
             on_reload_failed=_gui_log,
             on_command_preview=lambda command: _gui_log(
-                f"  執行命令: {' '.join(command[:3])}..."
+                f"  執行命令: {_format_command_preview(command)}"
             ),
+            on_token_usage=_gui_log,
             on_cli_output=_on_gui_cli_output,
             on_iteration_end=_sync_gui_state,
             interruptible_delay=True,
@@ -4026,6 +4135,10 @@ def _register_runtime_api_routes(
         _gui_log("⏹ 使用者請求停止")
         return jsonify({"ok": True})
 
+    @app.route("/api/diagnose")
+    def api_diagnose():
+        return jsonify(_build_diagnose_report())
+
     @app.route("/api/status")
     def api_status():
         build_info = _app_build_info()
@@ -4044,7 +4157,7 @@ def _register_runtime_api_routes(
                 "working_dir": _gui_state.get("working_dir", ""),
                 "app_version": build_info["version"],
                 "build_mode": build_info["mode"],
-                "self_check": _desktop_self_check(),
+                "self_check": _runtime_self_check(),
             }
         minutes = int(elapsed_seconds) // 60
         seconds = int(elapsed_seconds) % 60
@@ -4183,7 +4296,7 @@ def _start_desktop(*, port: int = DEFAULT_DESKTOP_PORT) -> None:
             f"Starting desktop GUI v{build_info['version']} on "
             f"http://127.0.0.1:{port} (config: {config_dir})"
         )
-        for issue in _desktop_self_check():
+        for issue in _runtime_self_check():
             _desktop_log(f"Self-check warning: {issue}")
 
         _suppress_werkzeug_logs()

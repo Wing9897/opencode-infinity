@@ -377,6 +377,50 @@ class SmokeTests(unittest.TestCase):
                 )
             self.assertEqual(mock_run.call_args.kwargs.get("cwd"), str(working_dir))
 
+    def test_parse_opencode_stats_tokens(self) -> None:
+        output = (
+            "Input 12.5K\n"
+            "Output 3K\n"
+            "Cache Read 1.2M\n"
+            "Cache Write 500\n"
+        )
+        self.assertEqual(self.mod._parse_opencode_stats_tokens(output), 1_216_000)
+
+    def test_parse_opencode_stats_tokens_empty(self) -> None:
+        self.assertIsNone(self.mod._parse_opencode_stats_tokens("no stats here"))
+
+    def test_opencode_build_export_command_returns_none(self) -> None:
+        with patch.object(self.mod.shutil, "which", return_value="/usr/bin/opencode"):
+            adapter = self.mod.OpenCodeAdapter(self.mod.CLIConfig(tool="opencode"))
+        self.assertIsNone(adapter.build_export_command("ses_test"))
+
+    def test_opencode_build_stats_command_includes_project(self) -> None:
+        with patch.object(self.mod.shutil, "which", return_value="/usr/bin/opencode"):
+            adapter = self.mod.OpenCodeAdapter(self.mod.CLIConfig(tool="opencode"))
+        self.assertEqual(adapter.build_stats_command()[-2:], ["--project", ""])
+
+    def test_format_command_preview_truncates_prompt(self) -> None:
+        prompt = "x" * 500
+        preview = self.mod._format_command_preview(["opencode", "run", prompt])
+        self.assertTrue(preview.startswith("opencode run "))
+        self.assertLess(len(preview), len(prompt) + 20)
+
+    def test_display_config_show_token_usage_default(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            config_dir = self._init_with_templates(tmp)
+            config = self.mod.ConfigLoader(config_dir / "opencode.yaml").load()
+            self.assertTrue(config.display.show_token_usage)
+
+    def test_api_diagnose_returns_report(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            self.mod.init_config_dir(tmp)
+            client = self.mod._create_flask_app().test_client()
+            payload = client.get("/api/diagnose").get_json()
+            self.assertTrue(payload["ok"])
+            self.assertIn("build", payload)
+            self.assertIn("issues", payload)
+            self.assertIsInstance(payload["issues"], list)
+
 
 if __name__ == "__main__":
     unittest.main()

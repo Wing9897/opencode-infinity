@@ -179,13 +179,31 @@ function workingDirStorageKey(name) {
     return STORAGE_KEY_WORKING_DIR + ':' + name;
 }
 
-function migrateLegacyWorkingDirOverride(configName) {
-    const legacy = localStorage.getItem(STORAGE_KEY_WORKING_DIR);
-    if (!legacy || !configName) return;
-    if (!localStorage.getItem(workingDirStorageKey(configName))) {
-        localStorage.setItem(workingDirStorageKey(configName), legacy);
-    }
-    localStorage.removeItem(STORAGE_KEY_WORKING_DIR);
+function prefillWorkingDirFromConfig(name) {
+    if (!name || !workingDirInput) return;
+    workingDirInput.value = localStorage.getItem(workingDirStorageKey(name)) || '';
+    fetchYamlWorkingDir(name).then(() => updateWorkingDirHint());
+}
+
+function runDiagnose() {
+    apiFetch('/api/diagnose').then((data) => {
+        addLog('🔍 環境診斷');
+        if (data.build) {
+            addLog(`  Infinity: ${data.build.mode} ${data.build.version}`);
+        }
+        if (data.opencode) {
+            addLog(`  OpenCode: ${data.opencode.version} @ ${data.opencode.path}`);
+            addLog(`  Headless: ${data.opencode.headless_mode}`);
+        }
+        if (data.config_dir) addLog(`  Config: ${data.config_dir}`);
+        if (data.working_dir) addLog(`  CWD: ${data.working_dir}`);
+        const issues = data.issues || [];
+        if (issues.length) {
+            issues.forEach((issue) => addLog(`  ⚠️ ${issue}`));
+        } else {
+            addLog('  ✅ 未發現問題');
+        }
+    }).catch((err) => showToast(String(err), 'error'));
 }
 
 function fetchYamlWorkingDir(name) {
@@ -223,13 +241,6 @@ function saveWorkingDirOverride(name, value) {
     const key = workingDirStorageKey(name);
     if (value) localStorage.setItem(key, value);
     else localStorage.removeItem(key);
-}
-
-function prefillWorkingDirFromConfig(name) {
-    if (!name || !workingDirInput) return;
-    migrateLegacyWorkingDirOverride(name);
-    workingDirInput.value = localStorage.getItem(workingDirStorageKey(name)) || '';
-    fetchYamlWorkingDir(name).then(() => updateWorkingDirHint());
 }
 
 function loadConfigList(selectName) {
@@ -633,6 +644,8 @@ document.getElementById('refresh-configs-btn').addEventListener('click', () => {
     loadConfigList(configSelect.value).then(() => showToast(t('toastConfigsRefreshed'), 'info'));
 });
 
+document.getElementById('diagnose-btn').addEventListener('click', runDiagnose);
+
 document.querySelectorAll('.js-create-templates-btn').forEach((btn) => {
     btn.addEventListener('click', () => createFactoryTemplates(btn));
 });
@@ -763,6 +776,7 @@ function editorGenerateConfig() {
         max_retries: parseInt(document.getElementById('ed-exec-retries').value) || 5,
         max_rounds: parseInt(document.getElementById('ed-exec-rounds').value) || 0,
         switch_after_rounds: parseInt(document.getElementById('ed-exec-switch-rounds').value) || 0,
+        switch_strategy: document.getElementById('ed-exec-switch-strategy').value || 'auto',
         max_tokens: parseInt(document.getElementById('ed-max-tokens').value) || 128000,
         token_threshold: parseFloat(document.getElementById('ed-token-threshold').value) || 0.7,
         auto_continue_on_error: document.getElementById('ed-exec-continue').checked
@@ -875,6 +889,7 @@ function editorFillForm(cfg) {
     document.getElementById('ed-exec-retries').value = exec.max_retries != null ? exec.max_retries : 5;
     document.getElementById('ed-exec-rounds').value = exec.max_rounds != null ? exec.max_rounds : 0;
     document.getElementById('ed-exec-switch-rounds').value = exec.switch_after_rounds != null ? exec.switch_after_rounds : 0;
+    document.getElementById('ed-exec-switch-strategy').value = exec.switch_strategy || 'auto';
     document.getElementById('ed-max-tokens').value = exec.max_tokens != null ? exec.max_tokens : 128000;
     document.getElementById('ed-token-threshold').value = exec.token_threshold != null ? exec.token_threshold : 0.7;
     document.getElementById('ed-exec-continue').checked = exec.auto_continue_on_error !== false;
