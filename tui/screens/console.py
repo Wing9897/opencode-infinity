@@ -95,6 +95,11 @@ class ConsolePanel(Vertical):
                     id="btn-copy-log",
                     classes="action-btn",
                 )
+                yield Button(
+                    i18n.t("btn_clear_log"),
+                    id="btn-clear-log",
+                    classes="action-btn",
+                )
             yield LogPanel(id="log-panel")
 
     def refresh_locale(self) -> None:
@@ -108,6 +113,7 @@ class ConsolePanel(Vertical):
         _set_button("btn-start", "btn_start", self)
         _set_button("btn-stop", "btn_stop", self)
         _set_button("btn-copy-log", "btn_copy_log", self)
+        _set_button("btn-clear-log", "btn_clear_log", self)
         _set_collapsible("section-advanced", "advanced", self)
         _set_label("lbl-working-dir", "label_working_dir", self)
         _set_label("lbl-session", "label_session", self)
@@ -116,6 +122,7 @@ class ConsolePanel(Vertical):
         self._reload_config_options()
         self._refresh_required_hints()
         self._sync_run_controls()
+        self.query_one("#log-panel", LogPanel).refresh_placeholder(i18n.t("log_empty"))
 
     def _reload_config_options(self) -> None:
         """Refresh config dropdown labels without re-triggering selection logic."""
@@ -135,7 +142,7 @@ class ConsolePanel(Vertical):
             self._select_config(saved)
         self._sync_run_controls()
         self._refresh_required_hints()
-        self.query_one("#log-panel", LogPanel).append_line(i18n.t("log_empty"))
+        self.query_one("#log-panel", LogPanel).show_placeholder(i18n.t("log_empty"))
 
     def _refresh_required_hints(self) -> None:
         select = self.query_one("#config-select", Select)
@@ -208,6 +215,12 @@ class ConsolePanel(Vertical):
             self.notify(i18n.t("toast_stopped"))
         elif button_id == "btn-copy-log":
             self.copy_log()
+        elif button_id == "btn-clear-log":
+            self.clear_log_panel()
+
+    def clear_log_panel(self) -> None:
+        self.query_one("#log-panel", LogPanel).show_placeholder(i18n.t("log_empty"))
+        self.notify(i18n.t("toast_log_cleared"))
 
     def copy_log(self) -> None:
         panel = self.query_one("#log-panel", LogPanel)

@@ -9,6 +9,8 @@ import yaml
 
 import opencode_infinity as core
 
+from tui import i18n
+
 
 class ServiceError(Exception):
     """User-facing service error."""
@@ -33,11 +35,11 @@ def read_config(name: str) -> dict[str, Any]:
     except core.ConfigError as exc:
         raise ServiceError(str(exc)) from exc
     if not target.is_file():
-        raise ServiceError("檔案不存在")
+        raise ServiceError(i18n.t("err_file_not_found"))
     try:
         content = target.read_text(encoding="utf-8")
     except OSError as exc:
-        raise ServiceError(f"讀取失敗: {exc}") from exc
+        raise ServiceError(i18n.t("err_read_failed", error=exc)) from exc
     working_dir = ""
     try:
         config = core.ConfigLoader(target).load()
@@ -57,13 +59,13 @@ def save_config(filename: str, content: str) -> str:
             content, source=f"TUI save payload: {filename}"
         )
     except core.ConfigError as exc:
-        raise ServiceError(f"YAML 格式無效: {exc}") from exc
+        raise ServiceError(i18n.t("err_yaml_invalid", error=exc)) from exc
     configs_dir = core.get_tasks_config_dir()
     configs_dir.mkdir(parents=True, exist_ok=True)
     try:
         target.write_text(content, encoding="utf-8")
     except OSError as exc:
-        raise ServiceError(f"寫入失敗: {exc}") from exc
+        raise ServiceError(i18n.t("err_write_failed", error=exc)) from exc
     return str(target)
 
 
@@ -80,7 +82,7 @@ def parse_yaml(content: str) -> dict[str, Any]:
     try:
         parsed = core._load_yaml_mapping_from_text(content, source="TUI parse payload")
     except core.ConfigError as exc:
-        raise ServiceError(f"YAML 解析失敗: {exc}") from exc
+        raise ServiceError(i18n.t("err_yaml_parse_failed", error=exc)) from exc
     keys = list(parsed.keys())
     if len(keys) == 1 and isinstance(parsed[keys[0]], dict):
         inner = parsed[keys[0]]
@@ -130,17 +132,17 @@ def prepare_start(
     working_dir_override: str,
 ) -> tuple[str, Optional[Path]]:
     if not config_name:
-        raise ServiceError("未指定設定檔")
+        raise ServiceError(i18n.t("err_no_config"))
     session_id = session_id.strip()
     working_dir_override = core._normalize_working_dir_text(working_dir_override)
     if session_id and not core._validate_session_id(session_id):
-        raise ServiceError("session_id 格式不正確")
+        raise ServiceError(i18n.t("err_session_id_invalid"))
     try:
         config_path = core._resolve_config_path(config_name)
     except core.ConfigError as exc:
         raise ServiceError(str(exc)) from exc
     if not config_path.is_file():
-        raise ServiceError(f"找不到設定檔: {config_name}")
+        raise ServiceError(i18n.t("err_config_not_found", name=config_name))
     try:
         config = core.ConfigLoader(config_path).load()
         resolved_working_dir = core._resolve_execution_working_dir(

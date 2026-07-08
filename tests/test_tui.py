@@ -16,7 +16,10 @@ class TuiTests(unittest.IsolatedAsyncioTestCase):
     async def test_app_mounts(self) -> None:
         import opencode_infinity as core
         from textual.widgets import Static
+        from tui import i18n
         from tui.app import InfinityApp
+        from tui.locale_refresh import refresh_app_locale
+        from tui.widgets.log_panel import LogPanel
 
         with tempfile.TemporaryDirectory() as tmp:
             core.init_config_dir(tmp)
@@ -27,6 +30,14 @@ class TuiTests(unittest.IsolatedAsyncioTestCase):
                 self.assertIsNotNone(app.query_one("#editor-panel"))
                 indicator = app.query_one("#tab-status", Static)
                 self.assertIn("輪次", str(indicator.content))
+                log = app.query_one("#log-panel", LogPanel)
+                log.show_placeholder("placeholder-zh")
+                i18n.set_locale("en")
+                refresh_app_locale(app)
+                self.assertIn(
+                    "Select a config",
+                    app.query_one("#log-panel", LogPanel).plain_text(),
+                )
                 self.assertFalse(app.controller.snapshot()["running"])
 
 
