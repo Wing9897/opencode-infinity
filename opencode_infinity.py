@@ -3710,7 +3710,7 @@ def _gui_run_task(
             return
 
         _gui_log(f"📄 讀取設定: {runtime.config_path}")
-        _gui_log(f"✅ 設定載入成功: tool={runtime.config.tool}")
+        _gui_log(f"✅ 設定載入成功: tool={runtime.config.cli.tool}")
 
         tool_warning = (
             _self_tool_directory_warning(runtime.working_dir)
