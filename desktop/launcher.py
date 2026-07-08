@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Desktop entry point for OpenCode Infinity GUI builds."""
+"""Desktop entry point for OpenCode Infinity TUI builds."""
 from __future__ import annotations
 
 import sys

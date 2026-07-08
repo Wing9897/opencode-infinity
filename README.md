@@ -8,67 +8,54 @@
 
 ## 安裝
 
-### 源碼版（CLI + 瀏覽器 GUI）
-
 ```bash
-pip install pyyaml flask
+pip install -r requirements.txt
 ```
 
-### 桌面版（pywebview）
-
-```bash
-pip install pyyaml flask pywebview
-```
+需要 **Python 3.10+** 與可顯示 Unicode 的終端機（Windows Terminal / PowerShell 7 建議）。
 
 ## 使用方式
 
-### CLI 模式
+### Textual TUI（唯一介面）
 
 ```bash
-# 在目標專案目錄中執行：
 cd /path/to/your-project
-python /path/to/opencode_infinity.py codex
-python /path/to/opencode_infinity.py ses_abc123 codex
+python /path/to/opencode_infinity.py
 ```
 
-### 瀏覽器 GUI 模式
+啟動後進入終端機介面，提供：
+
+- **控制台** — 選設定檔、啟動/停止、工作目錄覆寫、即時日誌、統計、環境診斷
+- **設定編輯器** — 圖形化編輯 YAML、AI 生成提示詞、保存設定檔
+- **快捷鍵** — `Ctrl+S` 保存編輯器、`Ctrl+Q` 退出（執行中需先停止）
+
+可選參數：
 
 ```bash
-python opencode_infinity.py --gui
-python opencode_infinity.py --gui --no-browser --port 9000
+python opencode_infinity.py --config-dir ./configs
 ```
-
-開啟瀏覽器 `http://127.0.0.1:8080`，提供：
-
-- **控制台** — 選設定檔、啟動/停止、工作目錄覆寫、即時日誌（預設輕量顯示）、統計
-- **設定編輯器** — 圖形化編輯 YAML、AI 生成提示詞、保存設定檔
-- **介面語言** — 右上角可切換中文 / English
 
 ### 桌面 exe（Release）
 
-Windows 使用者下載 `OpenCode-Infinity-GUI.exe` 即可（內嵌視窗，無需 Python）。
-
-源碼開發請用 `--gui`（瀏覽器），不必裝 pywebview。
+Windows 使用者下載 `OpenCode-Infinity.exe`，雙擊後在終端視窗中開啟 TUI（無需安裝 Python）。
 
 每次 **push 到 `main`**，GitHub Actions 會自動：
 
 1. 跑 smoke tests
-2. build `OpenCode-Infinity-GUI.exe`
+2. build `OpenCode-Infinity.exe`
 3. 依現有 tag **自動 bump patch 版本**（例如 `v1.0.0` → `v1.0.1`）
 4. 建立 GitHub Release 並上傳 exe
-
-也可在 **Actions → Build and Release → Run workflow** 手動觸發。
 
 本機手動 build：
 
 ```bash
-pip install pyinstaller flask pyyaml pywebview
+pip install -r requirements-desktop.txt
 pyinstaller desktop/opencode_infinity.spec --noconfirm
 ```
 
 ## 配置
 
-設定檔預設存放在使用者目錄（CLI / 瀏覽器 GUI / 桌面版共用）：
+設定檔預設存放在使用者目錄（源碼版與 exe 共用）：
 
 | 平台 | 路徑 |
 |------|------|
@@ -90,7 +77,7 @@ pyinstaller desktop/opencode_infinity.spec --noconfirm
 
 ```bash
 set OPENCODE_INFINITY_CONFIG_DIR=D:\my-configs
-python opencode_infinity.py --config-dir ./configs codex
+python opencode_infinity.py --config-dir ./configs
 ```
 
 ### 設定檔結構
@@ -155,9 +142,7 @@ summary_prompt: "Session 切換前的總結提示詞"
 - 熱重載：運行中修改 YAML，下一輪自動套用
 - 輸入消毒：防止命令注入
 - 即時輸出：Codex 的思考過程直接顯示在終端
-- Web GUI：控制台 + 設定編輯器 + AI 生成提示詞
-- 輕量日誌：預設只顯示最近幾條重點日誌
-- 成功/失敗統計：Ctrl+C 時顯示
+- Textual TUI：控制台 + 設定編輯器 + AI 生成提示詞
 
 ## 注意事項
 
@@ -169,27 +154,24 @@ summary_prompt: "Session 切換前的總結提示詞"
 
 ```
 opencode-infinity/
-├── opencode_infinity.py    ← 主程式（CLI / --gui）
+├── opencode_infinity.py    ← 核心邏輯 + TUI 入口
+├── tui/                    ← Textual 介面
+│   ├── app.py
+│   ├── services.py
+│   ├── runtime.py
+│   └── screens/
 ├── desktop/
-│   ├── launcher.py         ← exe 入口（內嵌視窗）
+│   ├── launcher.py         ← exe 入口
 │   └── opencode_infinity.spec
-├── gui/
-│   ├── index.html          ← Web GUI
-│   ├── styles.css
-│   ├── app.js
-│   └── i18n.js
 ├── configs/
-│   └── test-opencode.yaml  ← 本機 OpenCode 實測用
+│   └── test-opencode.yaml
 ├── tests/
-│   └── test_smoke.py
+│   ├── test_smoke.py
+│   └── test_tui.py
 ├── requirements.txt
 ├── requirements-desktop.txt
-├── .github/workflows/
-│   ├── ci.yml
-│   └── build-desktop.yml
-├── README.md
-├── README.en.md
-└── .gitignore
+└── .github/workflows/
+    └── build-desktop.yml
 ```
 
 ## 開發 / 測試
@@ -197,9 +179,6 @@ opencode-infinity/
 ```bash
 pip install -r requirements.txt
 python -m unittest discover -s tests -v
-
-# 本機 OpenCode 實測（在空目錄執行，避免改動本工具程式碼）
-python opencode_infinity.py --config-dir ./configs test-opencode
 ```
 
 ## 授權

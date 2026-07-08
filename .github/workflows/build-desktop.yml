@@ -93,7 +93,7 @@ jobs:
       - name: Upload build artifact
         uses: actions/upload-artifact@v4
         with:
-          name: OpenCode-Infinity-GUI
+          name: OpenCode-Infinity
           path: dist/*.exe
           if-no-files-found: error
 

@@ -37,22 +37,14 @@ class SmokeTests(unittest.TestCase):
         return config_dir
 
     def test_parse_launch_options(self) -> None:
-        positional, options = self.mod._parse_launch_options(
-            ["--config-dir", "./configs", "--port", "9000", "--no-browser", "codex"]
-        )
-        self.assertEqual(positional, ["codex"])
+        options = self.mod._parse_launch_options(["--config-dir", "./configs"])
         self.assertEqual(options.config_dir, "./configs")
-        self.assertEqual(options.port, 9000)
-        self.assertFalse(options.open_browser)
 
-    def test_resolve_launch_arguments(self) -> None:
-        session_id, config_name = self.mod._resolve_launch_arguments(["codex"])
-        self.assertTrue(session_id.startswith("ses_"))
-        self.assertEqual(config_name, "codex")
+        with self.assertRaises(self.mod.ConfigError):
+            self.mod._parse_launch_options(["codex"])
 
-        session_id, config_name = self.mod._resolve_launch_arguments(["ses_abc", "codex"])
-        self.assertEqual(session_id, "ses_abc")
-        self.assertEqual(config_name, "codex")
+        with self.assertRaises(self.mod.ConfigError):
+            self.mod._parse_launch_options(["--port", "9000"])
 
     def test_init_config_dir_does_not_seed(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -202,22 +194,51 @@ class SmokeTests(unittest.TestCase):
         self.assertIn("-c", cmd)
         self.assertNotIn("-s", cmd)
 
-    def test_gui_log_broadcasts_to_all_subscribers(self) -> None:
-        q1 = self.mod._gui_log_subscribe()
-        q2 = self.mod._gui_log_subscribe()
-        try:
-            self.mod._gui_log("broadcast-check")
-            m1 = q1.get_nowait()
-            while "broadcast-check" not in m1:
-                m1 = q1.get_nowait()
-            m2 = q2.get_nowait()
-            while "broadcast-check" not in m2:
-                m2 = q2.get_nowait()
-            self.assertIn("broadcast-check", m1)
-            self.assertIn("broadcast-check", m2)
-        finally:
-            self.mod._gui_log_unsubscribe(q1)
-            self.mod._gui_log_unsubscribe(q2)
+    def test_services_list_and_templates(self) -> None:
+        from tui import services
+
+        with tempfile.TemporaryDirectory() as tmp:
+            self.mod.init_config_dir(tmp)
+            self.assertEqual(services.list_configs(), [])
+            result = services.create_templates()
+            self.assertEqual(result["errors"], [])
+            self.assertIn("codex.yaml", services.list_configs())
+
+    def test_services_save_and_read_config(self) -> None:
+        from tui import services
+        from tui.services import ServiceError
+
+        with tempfile.TemporaryDirectory() as tmp:
+            self.mod.init_config_dir(tmp)
+            yaml_text = "cli:\n  tool: codex\nprompts:\n  - go\n"
+            path = services.save_config("test.yaml", yaml_text)
+            self.assertTrue(Path(path).is_file())
+            payload = services.read_config("test.yaml")
+            self.assertIn("tool: codex", payload["content"])
+            with self.assertRaises(ServiceError):
+                services.read_config("missing.yaml")
+
+    def test_services_prepare_start(self) -> None:
+        from tui import services
+        from tui.services import ServiceError
+
+        with tempfile.TemporaryDirectory() as tmp:
+            config_dir = self._init_with_templates(tmp)
+            session_id, resolved = services.prepare_start("codex.yaml", "", "")
+            self.assertTrue(session_id.startswith("ses_"))
+            self.assertIsNone(resolved)
+            with self.assertRaises(ServiceError):
+                services.prepare_start("missing.yaml", "", "")
+
+    def test_services_diagnose(self) -> None:
+        from tui import services
+
+        with tempfile.TemporaryDirectory() as tmp:
+            self.mod.init_config_dir(tmp)
+            payload = services.get_diagnose()
+            self.assertTrue(payload["ok"])
+            self.assertIn("build", payload)
+            self.assertIn("issues", payload)
 
     def test_ensure_windows_user_path_adds_npm(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -239,63 +260,14 @@ class SmokeTests(unittest.TestCase):
         with self.assertRaises(self.mod.ConfigError):
             self.mod._validate_config_filename("bad.txt")
 
-    def test_api_rejects_path_traversal(self) -> None:
+    def test_services_rejects_path_traversal(self) -> None:
+        from tui import services
+        from tui.services import ServiceError
+
         with tempfile.TemporaryDirectory() as tmp:
             self.mod.init_config_dir(tmp)
-            client = self.mod._create_flask_app().test_client()
-            response = client.get("/api/config/..secret.yaml")
-            self.assertEqual(response.status_code, 400)
-            self.assertFalse(response.get_json()["ok"])
-
-    def test_api_start_requires_existing_config(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            self.mod.init_config_dir(tmp)
-            client = self.mod._create_flask_app().test_client()
-            response = client.post("/api/start", json={"config": "missing.yaml"})
-            self.assertEqual(response.status_code, 400)
-            self.assertFalse(response.get_json()["ok"])
-
-    def test_flask_api_smoke(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            self.mod.init_config_dir(tmp)
-            client = self.mod._create_flask_app().test_client()
-
-            index_response = client.get("/")
-            self.assertEqual(index_response.status_code, 200)
-            self.assertIn(b"OpenCode Infinity", index_response.data)
-            self.assertIn(b"ui-lang-select", index_response.data)
-
-            for asset, content_type in (
-                ("/gui/styles.css", "css"),
-                ("/gui/app.js", "javascript"),
-                ("/gui/i18n.js", "javascript"),
-                ("/gui/pico.min.css", "css"),
-            ):
-                response = client.get(asset)
-                self.assertEqual(response.status_code, 200, asset)
-                self.assertTrue(response.content_type and content_type in response.content_type)
-
-            self.assertIn(b"MESSAGES", client.get("/gui/i18n.js").data)
-            self.assertEqual(client.get("/api/configs").get_json()["configs"], [])
-
-            create_response = client.post("/api/config/create-templates")
-            self.assertEqual(create_response.status_code, 200)
-            create_payload = create_response.get_json()
-            self.assertTrue(create_payload["ok"])
-            self.assertEqual(sorted(create_payload["created"]), ["article-en.yaml", "codex.yaml", "opencode.yaml"])
-
-            self.assertIn("codex.yaml", client.get("/api/configs").get_json()["configs"])
-            self.assertFalse(client.get("/api/status").get_json()["running"])
-
-    def test_api_status_includes_build_info(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            self.mod.init_config_dir(tmp)
-            client = self.mod._create_flask_app().test_client()
-            payload = client.get("/api/status").get_json()
-            self.assertIn("app_version", payload)
-            self.assertIn("build_mode", payload)
-            self.assertIn("self_check", payload)
-            self.assertIsInstance(payload["self_check"], list)
+            with self.assertRaises(ServiceError):
+                services.read_config("..secret.yaml")
 
     def test_bootstrap_runtime_loads_config(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -330,20 +302,18 @@ class SmokeTests(unittest.TestCase):
                 )
                 self.assertEqual(resolved, Path(other).resolve())
 
-    def test_api_start_rejects_invalid_working_dir(self) -> None:
+    def test_services_prepare_start_rejects_invalid_working_dir(self) -> None:
+        from tui import services
+        from tui.services import ServiceError
+
         with tempfile.TemporaryDirectory() as tmp:
-            self.mod.init_config_dir(tmp)
-            self.mod._create_factory_templates(Path(tmp))
-            client = self.mod._create_flask_app().test_client()
-            response = client.post(
-                "/api/start",
-                json={
-                    "config": "codex.yaml",
-                    "working_dir": str(Path(tmp) / "missing-dir"),
-                },
-            )
-            self.assertEqual(response.status_code, 400)
-            self.assertFalse(response.get_json()["ok"])
+            self._init_with_templates(tmp)
+            with self.assertRaises(ServiceError):
+                services.prepare_start(
+                    "codex.yaml",
+                    "",
+                    str(Path(tmp) / "missing-dir"),
+                )
 
     def test_legacy_task_section_still_loads(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -410,16 +380,6 @@ class SmokeTests(unittest.TestCase):
             config_dir = self._init_with_templates(tmp)
             config = self.mod.ConfigLoader(config_dir / "opencode.yaml").load()
             self.assertTrue(config.display.show_token_usage)
-
-    def test_api_diagnose_returns_report(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            self.mod.init_config_dir(tmp)
-            client = self.mod._create_flask_app().test_client()
-            payload = client.get("/api/diagnose").get_json()
-            self.assertTrue(payload["ok"])
-            self.assertIn("build", payload)
-            self.assertIn("issues", payload)
-            self.assertIsInstance(payload["issues"], list)
 
 
 if __name__ == "__main__":

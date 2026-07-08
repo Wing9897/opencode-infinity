@@ -8,67 +8,54 @@ Set your prompts once — the tool keeps calling the AI for you, handling retrie
 
 ## Installation
 
-### From source (CLI + browser GUI)
-
 ```bash
-pip install pyyaml flask
+pip install -r requirements.txt
 ```
 
-### Desktop (pywebview)
-
-```bash
-pip install pyyaml flask pywebview
-```
+Requires **Python 3.10+** and a Unicode-capable terminal (Windows Terminal / PowerShell 7 recommended).
 
 ## Usage
 
-### CLI mode
+### Textual TUI (single interface)
 
 ```bash
-# Run from your target project directory:
 cd /path/to/your-project
-python /path/to/opencode_infinity.py codex
-python /path/to/opencode_infinity.py ses_abc123 codex
+python /path/to/opencode_infinity.py
 ```
 
-### Browser GUI mode
+Launches a terminal UI with:
+
+- **Console** — config picker, start/stop, working-dir override, live logs, stats, diagnose
+- **Config editor** — visual YAML editor, AI prompt generator, save configs
+- **Shortcuts** — `Ctrl+S` save editor, `Ctrl+Q` quit (stop the task first if running)
+
+Optional flag:
 
 ```bash
-python opencode_infinity.py --gui
-python opencode_infinity.py --gui --no-browser --port 9000
+python opencode_infinity.py --config-dir ./configs
 ```
-
-Open `http://127.0.0.1:8080` in your browser:
-
-- **Console** — pick a config, start/stop, working-directory override, live logs (compact by default), stats
-- **Config editor** — visual YAML editor, AI prompt generation, save configs
-- **UI language** — switch 中文 / English in the top-right corner
 
 ### Desktop exe (Release)
 
-Windows users can download `OpenCode-Infinity-GUI.exe` (embedded window, no Python required).
-
-For source development, use `--gui` (browser); you do not need pywebview.
+Windows users can download `OpenCode-Infinity.exe` and double-click to open the TUI in a console window (no Python required).
 
 On every **push to `main`**, GitHub Actions will:
 
 1. Run smoke tests
-2. Build `OpenCode-Infinity-GUI.exe`
+2. Build `OpenCode-Infinity.exe`
 3. **Auto-bump the patch version** on the existing tag (e.g. `v1.0.0` → `v1.0.1`)
 4. Create a GitHub Release and upload the exe
-
-You can also trigger manually via **Actions → Build and Release → Run workflow**.
 
 Local build:
 
 ```bash
-pip install pyinstaller flask pyyaml pywebview
+pip install -r requirements-desktop.txt
 pyinstaller desktop/opencode_infinity.spec --noconfirm
 ```
 
 ## Configuration
 
-Config files live in the user directory by default (shared by CLI, browser GUI, and desktop):
+Config files live in the user directory by default (shared by source and desktop exe):
 
 | Platform | Path |
 |----------|------|
@@ -155,9 +142,7 @@ The console shows which path will be used at start time.
 - Hot reload: edit YAML while running; changes apply on the next round
 - Input sanitization: guards against command injection
 - Live output: Codex reasoning streams to the terminal
-- Web GUI: console + config editor + AI prompt generation
-- Compact logs: show only the latest key log lines by default
-- Success/failure stats on Ctrl+C
+- Textual TUI: console + config editor + AI prompt generation
 
 ## Important
 
@@ -169,27 +154,24 @@ The console shows which path will be used at start time.
 
 ```
 opencode-infinity/
-├── opencode_infinity.py    ← main entry (CLI / --gui)
+├── opencode_infinity.py    ← core logic + TUI entry
+├── tui/                    ← Textual UI
+│   ├── app.py
+│   ├── services.py
+│   ├── runtime.py
+│   └── screens/
 ├── desktop/
-│   ├── launcher.py         ← exe entry (embedded window)
+│   ├── launcher.py         ← exe entry
 │   └── opencode_infinity.spec
-├── gui/
-│   ├── index.html          ← Web GUI
-│   ├── styles.css
-│   ├── app.js
-│   └── i18n.js
 ├── configs/
-│   └── test-opencode.yaml  ← local OpenCode smoke test
+│   └── test-opencode.yaml
 ├── tests/
-│   └── test_smoke.py
+│   ├── test_smoke.py
+│   └── test_tui.py
 ├── requirements.txt
 ├── requirements-desktop.txt
-├── .github/workflows/
-│   ├── ci.yml
-│   └── build-desktop.yml
-├── README.md
-├── README.en.md
-└── .gitignore
+└── .github/workflows/
+    └── build-desktop.yml
 ```
 
 ## Development / testing
@@ -197,9 +179,6 @@ opencode-infinity/
 ```bash
 pip install -r requirements.txt
 python -m unittest discover -s tests -v
-
-# Local OpenCode smoke test (use an empty dir to avoid editing this repo)
-python opencode_infinity.py --config-dir ./configs test-opencode
 ```
 
 ## License
