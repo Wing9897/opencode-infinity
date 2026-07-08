@@ -1320,6 +1320,21 @@ def _find_cli_tool(name: str) -> Optional[str]:
 
 
 _opencode_auto_flag_cache: dict[str, bool] = {}
+_opencode_capabilities_cache: dict[str, "OpenCodeCliCapabilities"] = {}
+
+
+@dataclass(frozen=True)
+class OpenCodeCliCapabilities:
+    """Runtime-detected OpenCode CLI features for the resolved executable."""
+
+    version: str
+    supports_auto: bool
+
+    @property
+    def headless_mode(self) -> str:
+        if self.supports_auto:
+            return "run --auto"
+        return "OPENCODE_PERMISSION"
 
 
 def _opencode_cli_supports_auto(executable: str) -> bool:
@@ -1345,6 +1360,34 @@ def _opencode_cli_supports_auto(executable: str) -> bool:
     return supports
 
 
+def _probe_opencode_cli(executable: str) -> OpenCodeCliCapabilities:
+    """Probe version and headless flags for the given opencode executable."""
+    cached = _opencode_capabilities_cache.get(executable)
+    if cached is not None:
+        return cached
+    version = "unknown"
+    try:
+        result = subprocess.run(
+            [executable, "--version"],
+            capture_output=True,
+            text=True,
+            timeout=15,
+            creationflags=get_creation_flags(),
+            stdin=subprocess.DEVNULL,
+        )
+        version_text = (result.stdout or result.stderr or "").strip()
+        if version_text:
+            version = version_text.splitlines()[0].strip()
+    except (OSError, subprocess.TimeoutExpired, ValueError):
+        version = "unknown"
+    capabilities = OpenCodeCliCapabilities(
+        version=version,
+        supports_auto=_opencode_cli_supports_auto(executable),
+    )
+    _opencode_capabilities_cache[executable] = capabilities
+    return capabilities
+
+
 class OpenCodeAdapter(CLIAdapter):
     """Adapter for the OpenCode CLI tool."""
 
@@ -1360,9 +1403,14 @@ class OpenCodeAdapter(CLIAdapter):
                 "Please ensure opencode is installed and available in PATH."
             )
         self._executable = executable
-        self._supports_auto = _opencode_cli_supports_auto(executable)
+        self._capabilities = _probe_opencode_cli(executable)
+        self._supports_auto = self._capabilities.supports_auto
         if config.model is not None:
             _validate_model_name(config.model)
+
+    @property
+    def capabilities(self) -> OpenCodeCliCapabilities:
+        return self._capabilities
 
     def _model_flags(self) -> list[str]:
         if self._config.model:
@@ -1715,7 +1763,64 @@ _OPENCODE_DESKTOP_ENV_KEYS: tuple[str, ...] = (
 _SUBPROCESS_STDERR_FAILURE_PATTERNS: tuple[str, ...] = (
     "session not found",
     "notfounderror",
+    "unknown argument",
+    "unknown option",
 )
+
+
+def _cli_output_indicates_failure(output_text: str) -> bool:
+    lower = output_text.lower()
+    if any(pattern in lower for pattern in _SUBPROCESS_STDERR_FAILURE_PATTERNS):
+        return True
+    if "positionals:" in lower and "options:" in lower and "show help" in lower:
+        return True
+    return False
+
+
+def _stderr_indicates_failure(stderr_text: str) -> bool:
+    return _cli_output_indicates_failure(stderr_text)
+
+
+def _evaluate_subprocess_success(
+    return_code: int, stdout_text: str = "", stderr_text: str = ""
+) -> bool:
+    if return_code != 0:
+        return False
+    return not _cli_output_indicates_failure(stdout_text + stderr_text)
+
+
+def _subprocess_failure_message(
+    return_code: int, stdout_text: str = "", stderr_text: str = ""
+) -> str:
+    combined = stdout_text + stderr_text
+    if _cli_output_indicates_failure(combined):
+        lower = combined.lower()
+        if "positionals:" in lower and "options:" in lower:
+            return "CLI printed help (unsupported flag or invalid arguments)"
+        if return_code == 0:
+            return "Command exited 0 but output indicates failure (e.g. Session not found)"
+    return f"Command exited with code {return_code}"
+
+
+def _format_round_failure_message(round_num: int, result: ExecutionResult) -> str:
+    base = (
+        f"  ❌ Round {round_num} 失敗 "
+        f"(code={result.return_code}, retries={result.retry_count})"
+    )
+    combined = result.stdout_text + result.stderr_text
+    hints: list[str] = []
+    lower = combined.lower()
+    if "positionals:" in lower and "options:" in lower:
+        hints.append(
+            "CLI 參數不相容（可能用了此版本不支援的 flag；請看啟動日誌中的 OpenCode 版本）"
+        )
+    elif "session not found" in lower:
+        hints.append("Session 無法接續，請確認工作目錄固定且 Round 1 已成功")
+    if result.errors:
+        hints.append(result.errors[-1].message)
+    if hints:
+        return f"{base} — {'; '.join(hints)}"
+    return base
 
 
 def _is_opencode_command(command: list[str]) -> bool:
@@ -1735,23 +1840,6 @@ def _subprocess_env_for_command(command: list[str]) -> dict[str, str]:
         if not _opencode_cli_supports_auto(command[0]):
             env["OPENCODE_PERMISSION"] = '{"*":"allow"}'
     return env
-
-
-def _stderr_indicates_failure(stderr_text: str) -> bool:
-    lower = stderr_text.lower()
-    return any(pattern in lower for pattern in _SUBPROCESS_STDERR_FAILURE_PATTERNS)
-
-
-def _evaluate_subprocess_success(return_code: int, stderr_text: str) -> bool:
-    if return_code != 0:
-        return False
-    return not _stderr_indicates_failure(stderr_text)
-
-
-def _subprocess_failure_message(return_code: int, stderr_text: str) -> str:
-    if return_code == 0 and _stderr_indicates_failure(stderr_text):
-        return "Command exited 0 but stderr indicates failure (e.g. Session not found)"
-    return f"Command exited with code {return_code}"
 
 
 class Executor:
@@ -1832,7 +1920,9 @@ class Executor:
                         )
                     last_stdout = self._decode_output(result.stdout)
                     last_stderr = self._decode_output(result.stderr)
-                    if _evaluate_subprocess_success(result.returncode, last_stderr):
+                    if _evaluate_subprocess_success(
+                        result.returncode, last_stdout, last_stderr
+                    ):
                         duration = time.monotonic() - start_time
                         return ExecutionResult(
                             success=True,
@@ -1849,7 +1939,7 @@ class Executor:
                         timestamp=utc_now_iso(),
                         return_code=result.returncode,
                         message=_subprocess_failure_message(
-                            result.returncode, last_stderr
+                            result.returncode, last_stdout, last_stderr
                         ),
                     )
                     errors.append(error)
@@ -1996,7 +2086,9 @@ class Executor:
                         ],
                     )
                 duration = time.monotonic() - start_time
-                success = _evaluate_subprocess_success(return_code, stderr_text)
+                success = _evaluate_subprocess_success(
+                    return_code, stdout_text, stderr_text
+                )
                 return ExecutionResult(
                     success=success,
                     return_code=return_code,
@@ -2011,7 +2103,7 @@ class Executor:
                                 timestamp=utc_now_iso(),
                                 return_code=return_code,
                                 message=_subprocess_failure_message(
-                                    return_code, stderr_text
+                                    return_code, stdout_text, stderr_text
                                 ),
                             )
                         ]
@@ -2045,11 +2137,14 @@ class Executor:
                     process.wait(timeout=timeout)
                     stdout_data, stderr_data = b"", b""
                 duration = time.monotonic() - start_time
+                stdout_text = self._decode_output(stdout_data)
                 stderr_text = self._decode_output(stderr_data)
                 return_code = (
                     process.returncode if process.returncode is not None else -1
                 )
-                success = _evaluate_subprocess_success(return_code, stderr_text)
+                success = _evaluate_subprocess_success(
+                    return_code, stdout_text, stderr_text
+                )
                 return ExecutionResult(
                     success=success,
                     return_code=return_code,
@@ -2064,7 +2159,7 @@ class Executor:
                                 timestamp=utc_now_iso(),
                                 return_code=return_code,
                                 message=_subprocess_failure_message(
-                                    return_code, stderr_text
+                                    return_code, stdout_text, stderr_text
                                 ),
                             )
                         ]
@@ -3712,7 +3807,15 @@ def _gui_run_task(
             return
 
         if isinstance(adapter, OpenCodeAdapter):
+            caps = adapter.capabilities
             _gui_log(f"🔧 OpenCode: {adapter._executable}")
+            _gui_log(f"   版本: {caps.version}")
+            if caps.supports_auto:
+                _gui_log("   無人值守: run --auto")
+            else:
+                _gui_log(
+                    "   無人值守: OPENCODE_PERMISSION（此版本不支援 --auto）"
+                )
 
         executor = Executor(working_dir=working_dir)
         session_manager = SessionManager(adapter, executor, config)
@@ -3778,7 +3881,7 @@ def _gui_run_task(
             on_round_begin=_on_gui_round_begin,
             on_round_success=_on_gui_round_success,
             on_round_failure=lambda round_num, result: _gui_log(
-                f"  ❌ Round {round_num} 失敗 (code={result.return_code}, retries={result.retry_count})"
+                _format_round_failure_message(round_num, result)
             ),
             on_session_switched=lambda new_session_id: _gui_log(
                 f"✅ 切換到新 Session: {new_session_id}"

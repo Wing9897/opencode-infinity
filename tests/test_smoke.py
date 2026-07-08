@@ -28,6 +28,8 @@ class SmokeTests(unittest.TestCase):
 
     def setUp(self) -> None:
         self.mod._tasks_config_dir = None
+        self.mod._opencode_auto_flag_cache.clear()
+        self.mod._opencode_capabilities_cache.clear()
 
     def _init_with_templates(self, tmp: str) -> Path:
         config_dir = self.mod.init_config_dir(tmp)
@@ -126,10 +128,14 @@ class SmokeTests(unittest.TestCase):
         self.assertEqual(env["OPENCODE_PERMISSION"], '{"*":"allow"}')
 
     def test_opencode_headless_uses_auto_flag_when_supported(self) -> None:
+        caps = self.mod.OpenCodeCliCapabilities(version="2.0.0", supports_auto=True)
         with patch.object(self.mod.shutil, "which", return_value="/usr/bin/opencode"):
-            with patch.object(self.mod, "_opencode_cli_supports_auto", return_value=True):
+            with patch.object(self.mod, "_probe_opencode_cli", return_value=caps):
                 adapter = self.mod.OpenCodeAdapter(self.mod.CLIConfig(tool="opencode"))
-        self.assertEqual(adapter.build_run_command("hi"), ["/usr/bin/opencode", "run", "--print-logs", "--auto", "hi"])
+        self.assertEqual(
+            adapter.build_run_command("hi"),
+            ["/usr/bin/opencode", "run", "--print-logs", "--auto", "hi"],
+        )
 
     def test_subprocess_env_strips_opencode_desktop_vars(self) -> None:
         with patch.dict(
@@ -154,14 +160,40 @@ class SmokeTests(unittest.TestCase):
             self.mod._stderr_indicates_failure("ERROR Session not found: ses_123")
         )
         self.assertTrue(self.mod._stderr_indicates_failure("NotFoundError: missing"))
+        self.assertTrue(
+            self.mod._cli_output_indicates_failure(
+                "Positionals:\nOptions:\n-h, --help  show help"
+            )
+        )
         self.assertFalse(self.mod._stderr_indicates_failure("completed successfully"))
 
     def test_evaluate_subprocess_success(self) -> None:
-        self.assertTrue(self.mod._evaluate_subprocess_success(0, ""))
+        self.assertTrue(self.mod._evaluate_subprocess_success(0, "", ""))
         self.assertFalse(
-            self.mod._evaluate_subprocess_success(0, "Session not found: ses_1")
+            self.mod._evaluate_subprocess_success(0, "", "Session not found: ses_1")
         )
-        self.assertFalse(self.mod._evaluate_subprocess_success(1, ""))
+        self.assertFalse(self.mod._evaluate_subprocess_success(1, "", ""))
+
+    def test_probe_opencode_cli(self) -> None:
+        with patch.object(self.mod.subprocess, "run") as mock_run:
+            mock_run.side_effect = [
+                self.mod.subprocess.CompletedProcess(
+                    args=["opencode", "--version"],
+                    returncode=0,
+                    stdout="1.2.27\n",
+                    stderr="",
+                ),
+                self.mod.subprocess.CompletedProcess(
+                    args=["opencode", "run", "--help"],
+                    returncode=0,
+                    stdout="Options:\n  -c, --continue\n",
+                    stderr="",
+                ),
+            ]
+            caps = self.mod._probe_opencode_cli("/usr/bin/opencode")
+        self.assertEqual(caps.version, "1.2.27")
+        self.assertFalse(caps.supports_auto)
+        self.assertEqual(caps.headless_mode, "OPENCODE_PERMISSION")
 
     def test_build_round_command_opencode_round2(self) -> None:
         with patch.object(self.mod.shutil, "which", return_value="/usr/bin/opencode"):
